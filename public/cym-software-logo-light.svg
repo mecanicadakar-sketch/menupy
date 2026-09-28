@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="cymBlueGradL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0066FF"/>
+      <stop offset="50%" stop-color="#0099FF"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+
+    <linearGradient id="cymYGradL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0080FF"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+
+    <filter id="cymGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Círculo perimetral azul eléctrico -->
+  <circle cx="250" cy="250" r="236" stroke="url(#cymBlueGradL)" stroke-width="7" fill="none"/>
+
+  <!-- Órbita / Swoosh dinámico superior-derecha -->
+  <path d="M 210,175 C 265,120 375,115 425,160 C 452,185 455,230 432,250 C 448,225 440,185 410,160 C 365,125 265,135 210,175 Z" fill="url(#cymBlueGradL)" filter="url(#cymGlow)"/>
+
+  <!-- Órbita / Swoosh dinámico inferior-izquierda -->
+  <path d="M 52,240 C 40,315 105,370 205,365 C 240,362 275,340 300,320 C 265,340 225,350 180,345 C 95,335 58,285 52,240 Z" fill="url(#cymBlueGradL)" filter="url(#cymGlow)"/>
+
+  <!-- Letra C (Blanco brillante / hielo) -->
+  <path d="M 205,200 C 190,182 170,175 145,175 C 105,175 72,208 72,250 C 72,292 105,325 145,325 C 170,325 190,318 205,300 L 175,278 C 168,288 158,293 145,293 C 122,293 105,274 105,250 C 105,226 122,207 145,207 C 158,207 168,212 175,222 Z" fill="#FFFFFF" filter="url(#cymGlow)"/>
+
+  <!-- Letra y (Azul eléctrico brillante estilizada) -->
+  <path d="M 172,205 L 208,205 L 235,270 L 262,205 L 298,205 L 248,310 C 235,338 218,350 190,350 L 172,350 L 172,324 L 186,324 C 200,324 208,318 214,302 L 217,294 Z" fill="url(#cymYGradL)" filter="url(#cymGlow)"/>
+
+  <!-- Letra M (Blanco brillante / hielo) -->
+  <path d="M 285,177 L 324,177 L 358,252 L 392,177 L 431,177 L 431,323 L 396,323 L 396,230 L 372,285 L 344,285 L 320,230 L 320,323 L 285,323 Z" fill="#FFFFFF" filter="url(#cymGlow)"/>
+
+  <!-- Texto inferior "Software" -->
+  <text x="250" y="408" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="52" letter-spacing="4" fill="#FFFFFF">Software</text>
+</svg>

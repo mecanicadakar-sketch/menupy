@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="100%" height="100%" fill="none">
+  <defs>
+    <!-- Gradiente azul vibrante para aros y órbita -->
+    <linearGradient id="cymOrbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0050E6"/>
+      <stop offset="60%" stop-color="#0072FF"/>
+      <stop offset="100%" stop-color="#00B4D8"/>
+    </linearGradient>
+
+    <!-- Gradiente para letra y -->
+    <linearGradient id="cymYGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0066FF"/>
+      <stop offset="100%" stop-color="#0099FF"/>
+    </linearGradient>
+
+    <!-- Halo luminoso para perfecta legibilidad en fondos oscuros manteniendo transparencia -->
+    <filter id="cymHalo" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#FFFFFF" flood-opacity="0.85"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#003366" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Círculo exterior azul continuo -->
+  <circle cx="300" cy="300" r="280" stroke="url(#cymOrbitGrad)" stroke-width="7" fill="none" filter="url(#cymHalo)"/>
+
+  <!-- Órbita dinámico: Swoosh superior derecho -->
+  <path d="M 250,210 C 310,145 440,140 500,195 C 535,225 540,285 515,310 C 530,280 525,230 485,200 C 430,158 315,168 250,210 Z" fill="url(#cymOrbitGrad)" filter="url(#cymHalo)"/>
+
+  <!-- Órbita dinámico: Swoosh inferior izquierdo -->
+  <path d="M 65,290 C 50,380 125,445 245,440 C 290,438 335,410 365,385 C 320,410 270,422 215,415 C 115,402 70,345 65,290 Z" fill="url(#cymOrbitGrad)" filter="url(#cymHalo)"/>
+
+  <!-- Letras CyM -->
+  <!-- Letra C (Azul marino con trazo puro) -->
+  <path d="M 245,245 C 230,225 205,215 175,215 C 125,215 85,255 85,305 C 85,355 125,395 175,395 C 205,395 230,385 245,365 L 210,340 C 200,352 188,360 175,360 C 145,360 124,335 124,305 C 124,275 145,250 175,250 C 188,250 200,258 210,270 Z" fill="#0A2540" filter="url(#cymHalo)"/>
+
+  <!-- Letra y (Azul eléctrico brillante estilizada) -->
+  <path d="M 205,248 L 250,248 L 282,328 L 314,248 L 358,248 L 298,375 C 282,410 262,425 228,425 L 205,425 L 205,393 L 222,393 C 238,393 248,385 256,368 L 260,358 Z" fill="url(#cymYGrad)" filter="url(#cymHalo)"/>
+
+  <!-- Letra M (Azul marino) -->
+  <path d="M 342,217 L 388,217 L 430,306 L 472,217 L 518,217 L 518,393 L 478,393 L 478,280 L 446,346 L 414,346 L 382,280 L 382,393 L 342,393 Z" fill="#0A2540" filter="url(#cymHalo)"/>
+
+  <!-- Texto inferior "Software" -->
+  <text x="300" y="490" text-anchor="middle" font-family="'Montserrat', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="62" letter-spacing="3" fill="#0A2540" filter="url(#cymHalo)">Software</text>
+</svg>
