@@ -1,0 +1,10 @@
+{
+  "name": "La Caserita Rotisería",
+  "description": "App de pedidos gastronómicos con selección de mesa/delivery/retiro, panel de registro de comercios con planes de precios y medios de pago, y panel de administración protegido con bloqueo por IP de 3 intentos fallidos.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
