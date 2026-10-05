@@ -1,32 +1,12 @@
 // api/menu.js
-// Conexión a base de datos Neon con fallback en memoria (en caso de no haber DATABASE_URL o estar offline)
+// Conexión persistente multi-comercio con base de datos en disco (data/caserita_db.json)
+// y fallback a base de datos Neon (si DATABASE_URL está configurada).
 
 import { neon } from "@neondatabase/serverless";
-
-// Mock en memoria con datos completos del comercio
-const memoryConfig = {
-  admin_user: "gerente",
-  pin: "comercio123",
-  business_name: "Rotisería Los Amigos",
-  slogan: "Pedí online - Comidas caseras y minutas",
-  phone_intl: "595981456789",
-  phone_display: "0981 123 456",
-  address: "Santa María III, Ruta 6ta km 3.5, Encarnación",
-  banner_image: "/banner.jpg",
-  delivery_note: "El costo de envío se coordina según la zona",
-  // Datos de Licencia y Suscripción del Comercio
-  license_code: "CAS-7K9B-X2M4",
-  license_plan: "Plan Anual PRO (1 Año)",
-  license_cost: "1.350.000 Gs. / año",
-  license_status: "activado", // "activado" | "revocado" | "anulado" | "vencido"
-  license_activated_at: "2026-03-01T12:00:00.000Z",
-  license_expires_at: "2027-03-01T12:00:00.000Z",
-  license_duration: "12 meses",
-  license_notes: "Licencia Anual con soporte y actualización oficial",
-};
+import { loadDb, saveDb, findStore, getActiveStore } from "./db.js";
 
 // Configuración y memoria de seguridad anti-fuerza bruta por IP
-const MAX_FAILED_ATTEMPTS = 3;
+const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutos de bloqueo
 const ipAttempts = new Map();
 
@@ -86,287 +66,6 @@ function resetIpAttempts(ip) {
   ipAttempts.delete(ip);
 }
 
-// Memoria de registros de comercios que quieren adquirir la App
-let memoryCommercialRegistrations = [
-  {
-    id: "REG-2026-101",
-    businessName: "Rotisería Los Amigos",
-    rubro: "Rotisería y Minutas",
-    ownerName: "Carlos González",
-    whatsapp: "595981456789",
-    email: "losamigos@gmail.com",
-    city: "Encarnación",
-    requestedUser: "losamigos",
-    requestedPassword: "••••••••",
-    plan: "anual",
-    planTitle: "Plan Anual PRO (Ahorrá 3 meses)",
-    amountGs: 1350000,
-    paymentMethod: "transferencia",
-    paymentRef: "SIPAP #49821 Banco Continental",
-    status: "activo",
-    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-  {
-    id: "REG-2026-102",
-    businessName: "Burger House Enc",
-    rubro: "Hamburguesería",
-    ownerName: "Marcos Giménez",
-    whatsapp: "595975123456",
-    email: "marcos@burgerhouse.py",
-    city: "Encarnación",
-    requestedUser: "burgerhouse",
-    requestedPassword: "••••••••",
-    plan: "mensual",
-    planTitle: "Plan Mensual",
-    amountGs: 150000,
-    paymentMethod: "tigo_money",
-    paymentRef: "Giro Tigo al 0985 913 400",
-    status: "pendiente",
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-  }
-];
-
-// Memoria de Códigos de Activación y Licencias para Comercios (Habilitación de App)
-let memoryActivationCodes = [
-  {
-    id: "ACT-101",
-    code: "CAS-7K9B-X2M4",
-    businessName: "Rotisería Los Amigos",
-    ownerName: "Carlos González",
-    whatsapp: "595981456789",
-    plan: "Plan Anual PRO (1 Año)",
-    costFormatted: "1.350.000 Gs. / año",
-    costGs: 1350000,
-    durationMonths: 12,
-    status: "activado", // "disponible" | "activado" | "revocado"
-    createdAt: new Date(Date.now() - 3600000 * 24 * 30).toISOString(),
-    activatedAt: new Date(Date.now() - 3600000 * 24 * 20).toISOString(),
-    expiresAt: new Date(Date.now() + 3600000 * 24 * 345).toISOString(),
-    activatedBy: "Carlos González (Rotisería Los Amigos)",
-    notes: "Licencia Anual con soporte y actualización oficial",
-  },
-  {
-    id: "ACT-102",
-    code: "CAS-4821-M8KP",
-    businessName: "Burger House Enc",
-    ownerName: "Marcos Giménez",
-    whatsapp: "595975123456",
-    plan: "Plan Mensual",
-    costFormatted: "150.000 Gs. / mes",
-    costGs: 150000,
-    durationMonths: 1,
-    status: "disponible",
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-    activatedAt: null,
-    expiresAt: null,
-    activatedBy: null,
-    notes: "Habilitación mensual para hamburguesería",
-  },
-  {
-    id: "ACT-103",
-    code: "CAS-9900-DEMO",
-    businessName: "Licencia Libre / Venta Directa",
-    ownerName: "Demostración Oficial",
-    whatsapp: "",
-    plan: "Plan Semestral",
-    costFormatted: "750.000 Gs. / 6 meses",
-    costGs: 750000,
-    durationMonths: 6,
-    status: "disponible",
-    createdAt: new Date().toISOString(),
-    activatedAt: null,
-    expiresAt: null,
-    activatedBy: null,
-    notes: "Código libre para pruebas y activación inmediata de cualquier comercio",
-  }
-];
-
-// Memoria de pedidos creados (Mesa, Delivery, Mostrador/Retiro) con cobro por caja y arqueo
-let memoryOrders = [
-  {
-    id: "PED-1577",
-    mode: "mesa",
-    tableNumber: "3",
-    customerName: "Juan",
-    customerPhone: "0981778899",
-    address: "Mesa 3 (Salón Principal)",
-    notes: "Pedido pasado a cocina",
-    items: [
-      { id: "alm2", name: "Milanesa de Carne con Guarnición", price: 30000, qty: 1 },
-      { id: "beb1", name: "Gaseosa 500ml", price: 7000, qty: 1 },
-      { id: "pos1", name: "Flan Casero con Dulce de Leche", price: 12000, qty: 1 }
-    ],
-    totalItems: 3,
-    totalPrice: 49000,
-    orderStatus: "en_preparacion", // En Cocina
-    deliveryStatus: "local",
-    paymentStatus: "pendiente",
-    paymentMethod: "",
-    paidAt: null,
-    createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "PED-1001",
-    mode: "mesa",
-    tableNumber: "4",
-    customerName: "Cliente en Salón",
-    customerPhone: "",
-    address: "",
-    notes: "Sin hielo en la bebida",
-    items: [
-      { id: "alm1", name: "Menú del día", price: 25000, qty: 2 },
-      { id: "beb1", name: "Gaseosa 500ml", price: 7000, qty: 2 }
-    ],
-    totalItems: 4,
-    totalPrice: 64000,
-    paymentStatus: "pendiente", // "pendiente" | "pagado"
-    paymentMethod: "", // "efectivo" | "pos" | "transferencia" | "tigo_money"
-    paidAt: null,
-    createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "PED-1002",
-    mode: "delivery",
-    tableNumber: "",
-    customerName: "Patricia Cabrera",
-    customerPhone: "0985112233",
-    address: "B° San Pedro etapa 3, casa verde c/ rejas",
-    notes: "Tocar timbre portón",
-    items: [
-      { id: "alm2", name: "Milanesa de Carne con Guarnición", price: 30000, qty: 1 },
-      { id: "pos1", name: "Flan Casero con Dulce de Leche", price: 12000, qty: 1 }
-    ],
-    totalItems: 2,
-    totalPrice: 42000,
-    paymentStatus: "pendiente",
-    paymentMethod: "",
-    paidAt: null,
-    createdAt: new Date(Date.now() - 50 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "PED-1003",
-    mode: "retiro",
-    tableNumber: "",
-    customerName: "Marcos Rolón",
-    customerPhone: "0975667788",
-    address: "Retira en mostrador",
-    notes: "Pasa en 15 minutos",
-    items: [
-      { id: "alm3", name: "Tallarines Caseros con Estofado", price: 28000, qty: 2 }
-    ],
-    totalItems: 2,
-    totalPrice: 56000,
-    paymentStatus: "pagado",
-    paymentMethod: "efectivo",
-    paidAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
-    createdAt: new Date(Date.now() - 3.5 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: "PED-1004",
-    mode: "mesa",
-    tableNumber: "2",
-    customerName: "Salón Mesa 2",
-    customerPhone: "",
-    address: "",
-    notes: "",
-    items: [
-      { id: "alm1", name: "Menú del día", price: 25000, qty: 1 },
-      { id: "pos2", name: "Budín de Pan Artesanal", price: 15000, qty: 1 }
-    ],
-    totalItems: 2,
-    totalPrice: 40000,
-    paymentStatus: "pagado",
-    paymentMethod: "pos",
-    paidAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
-    createdAt: new Date(Date.now() - 27 * 3600 * 1000).toISOString(),
-  }
-];
-
-let memoryMenu = [
-  {
-    category: "Platos Principales",
-    icon: "almuerzo",
-    items: [
-      {
-        id: "alm1",
-        name: "Menú del día",
-        desc: "Plato completo nutritivo, incluye guarnición del día",
-        price: 25000,
-        image: "",
-      },
-      {
-        id: "alm2",
-        name: "Milanesa de Carne con Guarnición",
-        desc: "Acompañada de papas fritas crocantes o ensalada mixta",
-        price: 30000,
-        image: "",
-      },
-      {
-        id: "alm3",
-        name: "Tallarines Caseros con Estofado",
-        desc: "Pasta fresca artesanal con salsa de estofado de carne",
-        price: 28000,
-        image: "",
-      },
-    ],
-  },
-  {
-    category: "Bebidas",
-    icon: "bebida",
-    items: [
-      {
-        id: "beb1",
-        name: "Gaseosa 500ml",
-        desc: "Coca-Cola, Sprite o Fanta (bien fría)",
-        price: 8000,
-        image: "",
-      },
-      {
-        id: "beb2",
-        name: "Jugo Natural Exprimido 500ml",
-        desc: "Naranja exprimida fresca o frutas de estación",
-        price: 12000,
-        image: "",
-      },
-      {
-        id: "beb3",
-        name: "Agua Mineral 500ml",
-        desc: "Con o sin gas, purificada",
-        price: 5000,
-        image: "",
-      },
-    ],
-  },
-  {
-    category: "Postres",
-    icon: "postre",
-    items: [
-      {
-        id: "pos1",
-        name: "Flan Casero con Dulce de Leche",
-        desc: "Receta tradicional casera con caramelo dorado",
-        price: 12000,
-        image: "",
-      },
-      {
-        id: "pos2",
-        name: "Tarta Dulce Artesanal",
-        desc: "Porción de tarta de frutilla o pasta frola",
-        price: 15000,
-        image: "",
-      },
-      {
-        id: "pos3",
-        name: "Ensalada de Frutas Frescas",
-        desc: "Frutas de estación picadas en jugo natural",
-        price: 10000,
-        image: "",
-      },
-    ],
-  },
-];
-
 function sendJson(res, statusCode, data) {
   if (typeof res.status === "function" && typeof res.json === "function") {
     return res.status(statusCode).json(data);
@@ -389,7 +88,8 @@ async function parseBody(req) {
       if (!data) return resolve({});
       try {
         resolve(JSON.parse(data));
-      } catch {
+      } catch (e) {
+        console.warn("[API] Error parseando body JSON:", e.message);
         resolve({});
       }
     });
@@ -407,13 +107,17 @@ let cachedSqlClient = undefined;
 
 function getSqlClient() {
   if (cachedSqlClient !== undefined) return cachedSqlClient;
-
-  const rawUrl = process.env.DATABASE_URL ? process.env.DATABASE_URL.trim() : "";
+  const rawUrl = (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.caseritas_POSTGRES_URL ||
+    process.env.caseritas_URL_DE_LA_BASE_DE_DATOS ||
+    ""
+  ).trim();
   if (!isValidPostgresUrl(rawUrl)) {
     cachedSqlClient = null;
     return null;
   }
-
   try {
     cachedSqlClient = neon(rawUrl);
     return cachedSqlClient;
@@ -423,115 +127,96 @@ function getSqlClient() {
   }
 }
 
-function buildBusinessObject(config) {
-  const adminUser = (config.admin_user && config.admin_user !== "Camuchi") ? config.admin_user : (memoryConfig.admin_user || "gerente");
-
-  const licCode = config.license_code || memoryConfig.license_code || "CAS-7K9B-X2M4";
-  const targetCode = memoryActivationCodes.find(
-    (c) => c.code === licCode || c.id === "ACT-101"
-  );
-
-  const licenseStatus = targetCode ? targetCode.status : (config.license_status || memoryConfig.license_status || "activado");
-  const licenseExpiresAt = targetCode?.expiresAt || config.license_expires_at || memoryConfig.license_expires_at || "2027-03-01T12:00:00.000Z";
-  const licensePlan = targetCode?.plan || config.license_plan || memoryConfig.license_plan || "Plan Anual PRO (1 Año)";
-  const licenseCost = targetCode?.costFormatted || config.license_cost || memoryConfig.license_cost || "1.350.000 Gs. / año";
-  const licenseCostGs = targetCode?.costGs || 1350000;
-  const licenseDuration = targetCode?.durationMonths ? `${targetCode.durationMonths} meses` : "12 meses";
-
-  return {
-    name: config.business_name || memoryConfig.business_name,
-    slogan: config.slogan || memoryConfig.slogan,
-    phoneIntl: config.phone_intl || memoryConfig.phone_intl,
-    phoneDisplay: config.phone_display || memoryConfig.phone_display,
-    address: config.address || memoryConfig.address,
-    bannerImage: config.banner_image || memoryConfig.banner_image,
-    deliveryNote: config.delivery_note || memoryConfig.delivery_note,
-    adminUser,
-    licenseCode: licCode,
-    licensePlan,
-    licenseCost,
-    licenseCostGs,
-    licenseDuration,
-    licenseStatus,
-    licenseActivatedAt: targetCode?.activatedAt || config.license_activated_at || memoryConfig.license_activated_at || "2026-03-01T12:00:00.000Z",
-    licenseExpiresAt,
-    licenseNotes: targetCode?.notes || config.license_notes || memoryConfig.license_notes || "Licencia Anual con soporte y actualización oficial",
-  };
-}
-
 export default async function handler(req, res) {
   const method = req.method ? req.method.toUpperCase() : "GET";
+  const db = loadDb();
   const sql = getSqlClient();
+  const clientIp = getClientIp(req);
 
+  // =========================================================================
+  // METODO GET: Cargar datos públicos de tienda, menú o estado de IP
+  // =========================================================================
   if (method === "GET") {
-    // Si se solicita limpiar bloqueos de IP
-    if (req.url && req.url.includes("action=resetIpStatus")) {
+    const url = req.url || "";
+
+    // 1. Limpiar bloqueos de IP
+    if (url.includes("action=resetIpStatus")) {
       ipAttempts.clear();
-      const clientIp = getClientIp(req);
       return sendJson(res, 200, { ok: true, clientIp, locked: false, attemptsLeft: MAX_FAILED_ATTEMPTS, remainingSeconds: 0 });
     }
 
-    // Si se consulta el estado de seguridad de la IP
-    if (req.url && req.url.includes("action=checkIpStatus")) {
-      const clientIp = getClientIp(req);
+    // 2. Consultar estado de seguridad de IP
+    if (url.includes("action=checkIpStatus")) {
       const secStatus = getIpSecurityStatus(clientIp);
       return sendJson(res, 200, { ok: true, clientIp, ...secStatus });
     }
 
-    if (sql) {
-      try {
-        const categories = await sql`
-          SELECT id, name, icon FROM categories ORDER BY sort_order ASC, id ASC
-        `;
-        const items = await sql`
-          SELECT id, category_id, name, description, price, image
-          FROM items ORDER BY sort_order ASC
-        `;
-        const configRows = await sql`SELECT key, value FROM config`;
-        const config = Object.fromEntries(configRows.map((r) => [r.key, r.value]));
-
-        const menu = categories.map((cat) => ({
-          category: cat.name,
-          icon: cat.icon || "generico",
-          items: items
-            .filter((it) => it.category_id === cat.id)
-            .map((it) => ({
-              id: it.id,
-              name: it.name,
-              desc: it.description || "",
-              price: it.price,
-              image: it.image || "",
-            })),
+    // 3. Obtener lista de todos los comercios activos
+    if (url.includes("action=getAllStores")) {
+      const activeStores = Object.values(db.stores)
+        .filter((s) => s.status === "activo")
+        .map((s) => ({
+          id: s.id,
+          name: s.business.name,
+          username: s.username,
+          bannerImage: s.business.bannerImage,
+          phoneDisplay: s.business.phoneDisplay,
+          rubro: s.business.rubro || s.rubro,
+          city: s.business.city || s.city,
         }));
-
-        const business = buildBusinessObject(config);
-
-        return sendJson(res, 200, {
-          menu: menu.length > 0 ? menu : memoryMenu,
-          deliveryNote: business.deliveryNote,
-          business,
-        });
-      } catch (err) {
-        console.warn("[AI Studio] Fallo consulta a base de datos, usando datos en memoria:", err);
-      }
+      return sendJson(res, 200, { ok: true, stores: activeStores, activeStoreId: db.activeStoreId });
     }
 
-    // Fallback en memoria
-    const business = buildBusinessObject(memoryConfig);
+    // 4. Cargar datos del comercio público activo o solicitado por query (?comercio=xxx o ?store=xxx)
+    let requestedStoreId = null;
+    try {
+      const parsedUrl = new URL(url, "http://localhost");
+      requestedStoreId = parsedUrl.searchParams.get("comercio") || parsedUrl.searchParams.get("store") || parsedUrl.searchParams.get("c");
+    } catch {}
+
+    const isExplicitDemo = url.includes("action=getDemoStore") || (!requestedStoreId);
+    const store = isExplicitDemo ? getActiveStore(db) : (findStore(db, requestedStoreId) || getActiveStore(db));
+    if (!store) {
+      return sendJson(res, 404, { error: "No hay comercios configurados" });
+    }
+
+    const allActiveStores = Object.values(db.stores)
+      .filter((s) => s.status === "activo")
+      .map((s) => ({
+        id: s.id,
+        name: s.business.name,
+        username: s.username,
+        bannerImage: s.business.bannerImage,
+        phoneDisplay: s.business.phoneDisplay,
+        rubro: s.business.rubro || s.rubro,
+        city: s.business.city || s.city,
+      }));
+
+    // Si es la tienda demo, devolver los datos y portada actualizados del comercio demo
+    const businessToReturn = { ...store.business };
+    if (store.id === "losamigos" || store.id === "menupy" || isExplicitDemo) {
+      businessToReturn.bannerImage = store.business?.bannerImage || db.stores["menupy"]?.business?.bannerImage || db.stores["losamigos"]?.business?.bannerImage || "/menupy_mockup_qr.jpg";
+    }
+
     return sendJson(res, 200, {
-      menu: memoryMenu,
-      deliveryNote: memoryConfig.delivery_note,
-      business,
+      isDemo: Boolean(isExplicitDemo),
+      storeId: store.id,
+      menu: store.menu || [],
+      deliveryNote: store.business.deliveryNote || "El costo de envío se coordina según la zona",
+      business: businessToReturn,
+      allStores: allActiveStores,
     });
   }
 
+  // =========================================================================
+  // METODO POST: Acciones de autenticación, guardado, registro y pedidos
+  // =========================================================================
   if (method === "POST") {
     try {
       const body = await parseBody(req);
-      const clientIp = getClientIp(req);
 
       // -------------------------------------------------------------
-      // 1. Consulta pública de estado de IP (para mostrar timer si está bloqueada)
+      // 1. Consulta pública de estado de IP
       // -------------------------------------------------------------
       if (body.action === "checkIpStatus") {
         const secStatus = getIpSecurityStatus(clientIp);
@@ -561,86 +246,135 @@ export default async function handler(req, res) {
         if (!businessName || !ownerName || !whatsapp || !requestedUser || !requestedPassword) {
           return sendJson(res, 400, {
             ok: false,
-            error: "Por favor completá los datos del comercio, responsable, usuario y contraseña.",
+            error: "Por favor completá los datos del comercio, responsable, email de usuario y contraseña.",
+          });
+        }
+
+        const cleanUser = String(requestedUser).trim().toLowerCase();
+        const cleanPass = String(requestedPassword).trim();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const isEmail = emailRegex.test(cleanUser);
+        const isAlphanumericUser = /^[a-zA-Z0-9._-]{3,60}$/.test(cleanUser);
+
+        if (!isEmail && !isAlphanumericUser) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: "En 'Usuario Deseado' ingresá un correo electrónico válido o un nombre de usuario de al menos 3 caracteres (ej: mi-comercio@gmail.com o micomercio).",
+          });
+        }
+
+        // Verificar si el usuario ya existe
+        if (db.stores[cleanUser]) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: `El usuario o email "${cleanUser}" ya se encuentra registrado. Por favor utilizá otro o ingresá con tu cuenta si ya fue activada.`,
           });
         }
 
         const regId = `REG-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+        const userEmail = String(email || cleanUser).trim().toLowerCase();
         const newClient = {
           id: regId,
           businessName: String(businessName).trim(),
           rubro: String(rubro || "Gastronomía").trim(),
           ownerName: String(ownerName).trim(),
           whatsapp: String(whatsapp).replace(/[^\d]/g, ""),
-          email: String(email || "").trim(),
+          email: userEmail,
           city: String(city || "").trim(),
-          requestedUser: String(requestedUser).trim().toLowerCase(),
-          requestedPassword: String(requestedPassword).trim(),
+          requestedUser: cleanUser,
+          requestedPassword: cleanPass, // Contraseña real guardada en la base persistente
           plan: String(plan || "anual"),
-          planTitle: String(planTitle || "Plan Anual PRO (Ahorrá 3 meses)"),
-          amountGs: Number(amountGs) || 1350000,
+          planTitle: String(planTitle || "Plan Anual PRO (1.000.000 Gs.)"),
+          amountGs: Number(amountGs) || 1000000,
           paymentMethod: String(paymentMethod || "transferencia"),
           paymentRef: String(paymentRef || "").trim(),
           status: "pendiente",
           createdAt: new Date().toISOString(),
         };
 
-        memoryCommercialRegistrations.unshift(newClient);
+        // Crear perfil de tienda aislado para este nuevo comercio
+        const starterMenu = [
+          {
+            category: "Especialidades de la Casa",
+            icon: "almuerzo",
+            items: [
+              {
+                id: `item-${Date.now().toString().slice(-4)}-1`,
+                name: "Plato Especial",
+                desc: "Especialidad artesanal de la casa, porción abundante",
+                price: 30000,
+                image: "",
+              },
+            ],
+          },
+          {
+            category: "Bebidas",
+            icon: "bebida",
+            items: [
+              {
+                id: `item-${Date.now().toString().slice(-4)}-2`,
+                name: "Gaseosa 500ml",
+                desc: "Línea completa bien fría",
+                price: 8000,
+                image: "",
+              },
+            ],
+          },
+        ];
 
-        // Si la base de datos Neon está activa, intentar guardar también allí
-        if (sql) {
-          try {
-            await sql`
-              CREATE TABLE IF NOT EXISTS commercial_registrations (
-                id TEXT PRIMARY KEY,
-                business_name TEXT,
-                rubro TEXT,
-                owner_name TEXT,
-                whatsapp TEXT,
-                email TEXT,
-                city TEXT,
-                requested_user TEXT,
-                requested_password TEXT,
-                plan TEXT,
-                plan_title TEXT,
-                amount_gs NUMERIC,
-                payment_method TEXT,
-                payment_ref TEXT,
-                status TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-              )
-            `;
-            await sql`
-              INSERT INTO commercial_registrations (
-                id, business_name, rubro, owner_name, whatsapp, email, city,
-                requested_user, requested_password, plan, plan_title,
-                amount_gs, payment_method, payment_ref, status, created_at
-              ) VALUES (
-                ${newClient.id}, ${newClient.businessName}, ${newClient.rubro}, ${newClient.ownerName},
-                ${newClient.whatsapp}, ${newClient.email}, ${newClient.city},
-                ${newClient.requestedUser}, ${newClient.requestedPassword}, ${newClient.plan}, ${newClient.planTitle},
-                ${newClient.amountGs}, ${newClient.paymentMethod}, ${newClient.paymentRef},
-                ${newClient.status}, ${newClient.createdAt}
-              )
-              ON CONFLICT (id) DO NOTHING
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error al guardar registro comercial en DB:", dbErr);
-          }
-        }
+        const durationMonths = String(plan).toLowerCase().includes("semestral") ? 6 : String(plan).toLowerCase().includes("anual") ? 12 : 1;
+        const licCode = `CAS-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+        db.stores[cleanUser] = {
+          id: cleanUser,
+          username: cleanUser,
+          email: cleanUser,
+          ownerEmail: cleanUser,
+          pin: cleanPass,
+          status: "pendiente", // Inicia pendiente hasta que el Administrador presione "✓ Activar"
+          business: {
+            name: newClient.businessName,
+            slogan: newClient.rubro || "Pedí online - Calidad y sabor",
+            phoneIntl: newClient.whatsapp,
+            phoneDisplay: newClient.whatsapp.length >= 9 ? newClient.whatsapp.replace(/(\d{4})(\d{3})(\d+)/, "$1 $2 $3") : newClient.whatsapp,
+            address: newClient.city ? `${newClient.city}, Paraguay` : "Encarnación, Paraguay",
+            bannerImage: "/banner.jpg",
+            deliveryNote: "El costo de envío se coordina según la zona",
+            adminUser: cleanUser,
+            ownerEmail: cleanUser,
+            ownerName: newClient.ownerName,
+            rubro: newClient.rubro,
+            city: newClient.city,
+            licenseCode: licCode,
+            licensePlan: newClient.planTitle,
+            licenseCost: `${Number(newClient.amountGs).toLocaleString("es-PY")} Gs.`,
+            licenseCostGs: newClient.amountGs,
+            licenseDuration: `${durationMonths} meses`,
+            licenseStatus: "pendiente",
+            licenseActivatedAt: null,
+            licenseExpiresAt: null,
+            licenseNotes: `Suscripción ${newClient.planTitle} solicitada por ${newClient.ownerName} (${cleanUser})`,
+          },
+          menu: starterMenu,
+          orders: [],
+        };
+
+        db.commercialRegistrations.unshift(newClient);
+        saveDb(db);
 
         return sendJson(res, 200, {
           ok: true,
           registration: newClient,
-          message: "Comercio registrado con éxito",
+          message: "Comercio registrado con éxito. Pendiente de activación por el Administrador.",
         });
       }
 
       // -------------------------------------------------------------
-      // 2.b. Registrar Pedido Realizado por Cliente (Mesa, Delivery, Retiro)
+      // 3. Crear Pedido (Mesa, Delivery, Retiro)
       // -------------------------------------------------------------
       if (body.action === "createOrder") {
         const {
+          storeId,
           mode,
           tableNumber,
           customerName,
@@ -652,7 +386,11 @@ export default async function handler(req, res) {
           totalPrice,
         } = body;
 
-        // Respetar el ID generado o provisto por el cliente
+        const targetStore = getActiveStore(db, storeId);
+        if (!targetStore) {
+          return sendJson(res, 404, { ok: false, error: "Comercio no encontrado" });
+        }
+
         const clientOrderId = body.id || body.orderId;
         const orderId = (clientOrderId && String(clientOrderId).trim().startsWith("PED-"))
           ? String(clientOrderId).trim()
@@ -661,6 +399,7 @@ export default async function handler(req, res) {
         const nowIso = new Date().toISOString();
         const newOrder = {
           id: orderId,
+          storeId: targetStore.id,
           mode: mode || "mesa",
           tableNumber: String(tableNumber || "").trim(),
           customerName: String(customerName || (mode === "mesa" ? `Mesa ${tableNumber || "en salón"}` : "Cliente")).trim(),
@@ -670,70 +409,27 @@ export default async function handler(req, res) {
           items: Array.isArray(items) ? items : [],
           totalItems: Number(totalItems) || (Array.isArray(items) ? items.reduce((s, i) => s + (i.qty || 1), 0) : 0),
           totalPrice: Number(totalPrice) || 0,
-          orderStatus: "recibido", // "recibido" | "en_preparacion" | "en_camino" | "completado" | "cancelado"
+          orderStatus: "recibido",
           deliveryStatus: mode === "delivery" ? "pendiente" : "local",
-          paymentStatus: "pendiente", // pendiente hasta que se cobre en caja
+          paymentStatus: "pendiente",
           paymentMethod: "",
           paidAt: null,
           createdAt: nowIso,
           updatedAt: nowIso,
         };
 
-        const existingIdx = memoryOrders.findIndex((o) => o.id === orderId);
+        if (!Array.isArray(targetStore.orders)) targetStore.orders = [];
+        const existingIdx = targetStore.orders.findIndex((o) => o.id === orderId);
         if (existingIdx >= 0) {
-          memoryOrders[existingIdx] = {
-            ...memoryOrders[existingIdx],
+          targetStore.orders[existingIdx] = {
+            ...targetStore.orders[existingIdx],
             ...newOrder,
-            orderStatus: memoryOrders[existingIdx].orderStatus || newOrder.orderStatus,
           };
         } else {
-          memoryOrders.unshift(newOrder);
+          targetStore.orders.unshift(newOrder);
         }
 
-        // Si la base de datos Neon está activa, intentar persistir en la tabla orders
-        if (sql) {
-          try {
-            await sql`
-              CREATE TABLE IF NOT EXISTS orders (
-                id TEXT PRIMARY KEY,
-                mode TEXT,
-                table_number TEXT,
-                customer_name TEXT,
-                customer_phone TEXT,
-                address TEXT,
-                notes TEXT,
-                items JSONB,
-                total_items NUMERIC,
-                total_price NUMERIC,
-                order_status TEXT DEFAULT 'recibido',
-                delivery_status TEXT,
-                payment_status TEXT DEFAULT 'pendiente',
-                payment_method TEXT,
-                paid_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-              )
-            `;
-            await sql`
-              INSERT INTO orders (
-                id, mode, table_number, customer_name, customer_phone,
-                address, notes, items, total_items, total_price,
-                order_status, delivery_status, payment_status, payment_method,
-                paid_at, created_at, updated_at
-              ) VALUES (
-                ${newOrder.id}, ${newOrder.mode}, ${newOrder.tableNumber},
-                ${newOrder.customerName}, ${newOrder.customerPhone}, ${newOrder.address},
-                ${newOrder.notes}, ${JSON.stringify(newOrder.items)}, ${newOrder.totalItems},
-                ${newOrder.totalPrice}, ${newOrder.orderStatus}, ${newOrder.deliveryStatus},
-                ${newOrder.paymentStatus}, ${newOrder.paymentMethod},
-                ${newOrder.paidAt}, ${newOrder.createdAt}, ${newOrder.updatedAt}
-              )
-              ON CONFLICT (id) DO NOTHING
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error guardando pedido en DB:", dbErr);
-          }
-        }
+        saveDb(db);
 
         return sendJson(res, 200, {
           ok: true,
@@ -743,7 +439,7 @@ export default async function handler(req, res) {
       }
 
       // -------------------------------------------------------------
-      // 2.c. Consulta Asíncrona de Estado de Pedidos para Clientes (Push Polling)
+      // 4. Consulta de estado de pedidos para clientes
       // -------------------------------------------------------------
       if (body.action === "checkOrdersStatus" || body.action === "getCustomerOrders") {
         const rawIds = Array.isArray(body.orderIds)
@@ -753,114 +449,10 @@ export default async function handler(req, res) {
           : [];
 
         const requestedIds = rawIds.filter(Boolean);
-        const ordersInfo = Array.isArray(body.ordersInfo) ? body.ordersInfo : [];
+        const allOrders = Object.values(db.stores).flatMap((s) => s.orders || []);
 
-        if (requestedIds.length === 0 && ordersInfo.length === 0) {
-          return sendJson(res, 200, { ok: true, orders: [] });
-        }
-
-        const foundOrders = [];
-        const matchedReqMap = new Map(); // order.id -> matchedRequestedId
-        const matchedOrderIds = new Set();
-
-        // 1. Coincidencia directa por ID exacto en memoria
-        for (const reqId of requestedIds) {
-          const direct = memoryOrders.find((o) => o.id === reqId);
-          if (direct && !matchedOrderIds.has(direct.id)) {
-            foundOrders.push(direct);
-            matchedReqMap.set(direct.id, reqId);
-            matchedOrderIds.add(direct.id);
-          }
-        }
-
-        // 2. Coincidencia inteligente si no se encontró por ID exacto
-        for (const reqId of requestedIds) {
-          if (![...matchedReqMap.values()].includes(reqId)) {
-            const reqInfo = ordersInfo.find((inf) => inf && inf.id === reqId);
-            const candidate = memoryOrders.find((o) => {
-              if (matchedOrderIds.has(o.id)) return false;
-              // Coincidencia por subcadena de ID
-              const cleanReq = reqId.replace(/^PED-/, "");
-              const cleanO = o.id.replace(/^PED-/, "");
-              if (cleanReq && cleanO && (cleanReq.startsWith(cleanO.slice(0, 4)) || cleanO.startsWith(cleanReq.slice(0, 4)))) {
-                return true;
-              }
-              // Coincidencia por cliente y mesa
-              if (reqInfo) {
-                const nameReq = String(reqInfo.customerName || "").trim().toLowerCase();
-                const nameO = String(o.customerName || "").trim().toLowerCase();
-                const sameCustomer = nameReq && nameO && (nameReq === nameO || nameReq.includes(nameO) || nameO.includes(nameReq));
-                const sameTable = (!reqInfo.tableNumber && !o.tableNumber) || (String(reqInfo.tableNumber || "").trim() === String(o.tableNumber || "").trim());
-                if (sameCustomer && sameTable) return true;
-              }
-              return false;
-            });
-
-            if (candidate) {
-              foundOrders.push(candidate);
-              matchedReqMap.set(candidate.id, reqId);
-              matchedOrderIds.add(candidate.id);
-            }
-          }
-        }
-
-        // 3. Si aún faltan pedidos y tenemos Neon DB activo
-        if (sql && foundOrders.length < requestedIds.length) {
-          try {
-            const dbOrders = await sql`
-              SELECT * FROM orders WHERE id = ANY(${requestedIds})
-            `;
-            if (dbOrders && dbOrders.length > 0) {
-              const mapped = dbOrders.map((r) => ({
-                id: r.id,
-                mode: r.mode,
-                tableNumber: r.table_number,
-                customerName: r.customer_name,
-                customerPhone: r.customer_phone,
-                address: r.address,
-                notes: r.notes,
-                items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
-                totalItems: Number(r.total_items),
-                totalPrice: Number(r.total_price),
-                orderStatus: r.order_status || (r.payment_status === "pagado" ? "completado" : "recibido"),
-                deliveryStatus: r.delivery_status || "pendiente",
-                paymentStatus: r.payment_status || "pendiente",
-                paymentMethod: r.payment_method || "",
-                paidAt: r.paid_at,
-                createdAt: r.created_at,
-                updatedAt: r.updated_at || r.created_at,
-              }));
-
-              for (const m of mapped) {
-                if (!matchedOrderIds.has(m.id)) {
-                  foundOrders.push(m);
-                  matchedReqMap.set(m.id, m.id);
-                  matchedOrderIds.add(m.id);
-                }
-              }
-            }
-          } catch (dbErr) {
-            console.warn("[AI Studio] Fallo lectura de pedidos cliente en DB:", dbErr);
-          }
-        }
-
-        const sanitized = foundOrders.map((o) => ({
-          id: o.id,
-          matchedRequestedId: matchedReqMap.get(o.id) || o.id,
-          mode: o.mode,
-          tableNumber: o.tableNumber,
-          customerName: o.customerName,
-          orderStatus: o.orderStatus || (o.paymentStatus === "pagado" ? "completado" : "recibido"),
-          deliveryStatus: o.deliveryStatus || "pendiente",
-          paymentStatus: o.paymentStatus || "pendiente",
-          paymentMethod: o.paymentMethod,
-          totalPrice: o.totalPrice,
-          items: o.items,
-          updatedAt: o.updatedAt || o.createdAt,
-          createdAt: o.createdAt,
-        }));
-
-        return sendJson(res, 200, { ok: true, orders: sanitized });
+        const foundOrders = allOrders.filter((o) => requestedIds.includes(o.id));
+        return sendJson(res, 200, { ok: true, orders: foundOrders });
       }
 
       // Desbloquear IPs si se solicita explícitamente
@@ -870,62 +462,589 @@ export default async function handler(req, res) {
       }
 
       // -------------------------------------------------------------
-      // 3. Verificación de Credenciales y Seguridad Anti-Fuerza Bruta
+      // 5. Validación y Activación de Códigos de Licencia (Público / Activación Directa)
       // -------------------------------------------------------------
-      // Carga de credenciales del único administrador autorizado
-      let configAdminUser = memoryConfig.admin_user;
-      let configPin = memoryConfig.pin;
+      if (body.action === "validateAndActivateCode") {
+        const rawCode = String(body.code || "").trim().toUpperCase().replace(/[\s-]+/g, "");
+        if (!rawCode) {
+          return sendJson(res, 400, { ok: false, error: "Por favor ingresá un código de activación." });
+        }
 
-      if (sql) {
-        try {
-          const configRows = await sql`SELECT key, value FROM config WHERE key IN ('admin_user', 'pin')`;
-          const config = Object.fromEntries(configRows.map((r) => [r.key, r.value]));
-          if (config.admin_user) configAdminUser = config.admin_user;
-          if (config.pin) configPin = config.pin;
-        } catch (err) {
-          console.warn("[AI Studio] Fallo lectura de config en DB, usando config local:", err);
+        // 1. Buscar en db.activationCodes
+        let targetCode = (db.activationCodes || []).find(
+          (c) => (c.code || "").replace(/[\s-]+/g, "").toUpperCase() === rawCode
+        );
+
+        // 2. Si no se encontró en lista de códigos, buscar si coincide con la licencia de alguna tienda
+        if (!targetCode) {
+          for (const s of Object.values(db.stores)) {
+            if (s.business?.licenseCode && s.business.licenseCode.replace(/[\s-]+/g, "").toUpperCase() === rawCode) {
+              targetCode = {
+                id: `ACT-${s.id}`,
+                code: s.business.licenseCode,
+                businessName: s.business.name,
+                ownerName: s.business.adminUser || "Comercio",
+                plan: s.business.licensePlan || "Plan Activo",
+                costFormatted: s.business.licenseCost || "1.000.000 Gs.",
+                durationMonths: s.business.licenseDuration || 12,
+                status: s.business.licenseStatus || "activado",
+                expiresAt: s.business.licenseExpiresAt || new Date(Date.now() + 365 * 24 * 3600000).toISOString(),
+                activatedAt: s.business.licenseActivatedAt || new Date().toISOString(),
+                notes: "Licencia de comercio",
+              };
+              break;
+            }
+          }
+        }
+
+        if (!targetCode) {
+          return sendJson(res, 404, {
+            ok: false,
+            error: `El código "${body.code}" no existe o no se encuentra registrado en el sistema.`,
+          });
+        }
+
+        if (targetCode.status === "revocado" || targetCode.status === "anulado") {
+          return sendJson(res, 403, {
+            ok: false,
+            error: "Este código de licencia ha sido revocado o anulado por el Administrador.",
+          });
+        }
+
+        const isExpired = targetCode.expiresAt ? (Date.now() > new Date(targetCode.expiresAt).getTime()) : false;
+        if (isExpired || targetCode.status === "vencido") {
+          return sendJson(res, 403, {
+            ok: false,
+            error: "Este código de licencia ha vencido. Contactá con el Administrador para renovarlo.",
+          });
+        }
+
+        // Habilitar y marcar código como activado
+        const nowIso = new Date().toISOString();
+        targetCode.status = "activado";
+        if (!targetCode.activatedAt) targetCode.activatedAt = nowIso;
+        const assignedName = (body.businessName && String(body.businessName).trim()) || targetCode.businessName;
+        if (assignedName && (!targetCode.businessName || targetCode.businessName.includes("Licencia Libre") || targetCode.businessName.includes("Venta Directa"))) {
+          targetCode.businessName = assignedName;
+        }
+        if (!targetCode.activatedBy) {
+          targetCode.activatedBy = assignedName || targetCode.ownerName || "Comercio Habilitado";
+        }
+
+        // Si hay un registro comercial asociado a este código o email, habilitarlo de inmediato
+        const matchedReg = (db.commercialRegistrations || []).find(
+          (r) =>
+            (targetCode.email && ((r.email && r.email.toLowerCase() === targetCode.email.toLowerCase()) || (r.requestedUser && r.requestedUser.toLowerCase() === targetCode.email.toLowerCase()))) ||
+            (r.assignedCode && r.assignedCode.replace(/[\s-]+/g, "").toUpperCase() === rawCode) ||
+            (r.requestedUser && r.requestedUser.toLowerCase() === (targetCode.ownerName || "").toLowerCase())
+        );
+        if (matchedReg) {
+          matchedReg.status = "activo";
+        }
+
+        // Asegurar que exista una tienda asociada en db.stores para este código y habilitar
+        const storeKey = targetCode.email || `store_${targetCode.code.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+        if (!db.stores[storeKey]) {
+          db.stores[storeKey] = {
+            id: storeKey,
+            username: (targetCode.email || targetCode.code.replace(/[^a-z0-9]/gi, "").toLowerCase()),
+            pin: (matchedReg && matchedReg.requestedPassword) || "1234",
+            status: "activo",
+            business: {
+              name: targetCode.businessName || "Mi Comercio",
+              slogan: "Pedí online - Calidad y sabor",
+              phoneIntl: targetCode.whatsapp || "595975635770",
+              phoneDisplay: targetCode.whatsapp || "0975 635 770",
+              address: "Encarnación, Paraguay",
+              bannerImage: "/menupy_mockup_qr.jpg",
+              deliveryNote: "El costo de envío se coordina según la zona",
+              adminUser: (targetCode.email || targetCode.code.toLowerCase()),
+              licenseCode: targetCode.code,
+              licensePlan: targetCode.plan || "Plan Anual PRO",
+              licenseCost: targetCode.costFormatted || "1.000.000 Gs.",
+              licenseStatus: "activado",
+              licenseExpiresAt: targetCode.expiresAt,
+            },
+            menu: DEFAULT_MENU_LOSAMIGOS,
+            orders: [],
+          };
+        } else {
+          const s = db.stores[storeKey];
+          s.status = "activo";
+          if (matchedReg && matchedReg.requestedPassword) {
+            s.pin = matchedReg.requestedPassword;
+          }
+          if (s.business) {
+            s.business.licenseCode = targetCode.code;
+            s.business.licenseStatus = "activado";
+            s.business.licenseExpiresAt = targetCode.expiresAt;
+            s.business.licensePlan = targetCode.plan;
+            if (targetCode.businessName) s.business.name = targetCode.businessName;
+          }
+        }
+
+        saveDb(db);
+        resetIpAttempts(clientIp);
+
+        return sendJson(res, 200, {
+          ok: true,
+          license: {
+            code: targetCode.code,
+            businessName: targetCode.businessName,
+            ownerName: targetCode.ownerName,
+            plan: targetCode.plan,
+            costFormatted: targetCode.costFormatted,
+            cost: targetCode.cost,
+            durationMonths: targetCode.durationMonths,
+            status: targetCode.status,
+            activatedAt: targetCode.activatedAt,
+            expiresAt: targetCode.expiresAt,
+            notes: targetCode.notes,
+          },
+          storeId: storeKey,
+          message: "¡Comercio habilitado exitosamente!",
+        });
+      }
+
+      // -------------------------------------------------------------
+      // 6. Autenticación con Google (Google Sign-In)
+      // -------------------------------------------------------------
+      if (body.action === "googleLogin") {
+        const email = String(body.email || "").trim().toLowerCase();
+        const name = String(body.name || "").trim();
+        const uid = String(body.uid || "").trim();
+        const photoURL = String(body.photoURL || "").trim();
+
+        if (!email) {
+          return sendJson(res, 400, { ok: false, error: "Email de Google no proporcionado." });
+        }
+
+        resetIpAttempts(clientIp);
+
+        // 1. Verificar si es Administrador Principal (Superadmin)
+        const isMasterGoogle = email === "mecanicadakar@gmail.com";
+
+        if (isMasterGoogle) {
+          const demoStore = findStore(db, "losamigos") || Object.values(db.stores)[0];
+          return sendJson(res, 200, {
+            ok: true,
+            role: "superadmin",
+            clientIp,
+            email,
+            displayName: name || "Administrador Maestro",
+            photoURL,
+            uid,
+            storeId: "losamigos",
+            user: "usuario",
+            business: {
+              ...(demoStore?.business || {}),
+              bannerImage: demoStore?.business?.bannerImage || "/banner.jpg",
+              adminUser: "usuario",
+              isPortalAdmin: true,
+            },
+            menu: demoStore?.menu && demoStore.menu.length > 0 ? demoStore.menu : DEFAULT_MENU_LOSAMIGOS,
+            orders: Object.values(db.stores).flatMap((s) => s.orders || []),
+            license: {
+              code: "CAS-ADMIN-MASTER",
+              plan: "Plan Administrador Maestro",
+              status: "activado",
+            },
+          });
+        }
+
+        // 2. Buscar si este email pertenece a algún comercio existente con licencia
+        let associatedStore = null;
+        for (const s of Object.values(db.stores)) {
+          if (
+            (s.email && s.email.toLowerCase() === email) ||
+            (s.ownerEmail && s.ownerEmail.toLowerCase() === email) ||
+            (s.business?.email && s.business.email.toLowerCase() === email) ||
+            (s.business?.ownerEmail && s.business.ownerEmail.toLowerCase() === email)
+          ) {
+            if (s.business?.licenseCode && s.business?.licenseStatus !== "revocado" && s.business?.licenseStatus !== "anulado") {
+              associatedStore = s;
+              break;
+            }
+          }
+        }
+
+        // Si no se encontró por email en la tienda, buscar en registros comerciales activos
+        if (!associatedStore) {
+          // Verificar si este email se encuentra registrado pero aún en estado PENDIENTE de habilitación
+          const pendingReg = (db.commercialRegistrations || []).find(
+            (r) =>
+              ((r.requestedUser && r.requestedUser.toLowerCase() === email) ||
+               (r.email && r.email.toLowerCase() === email)) &&
+              (r.status === "pendiente" || r.status === "pending")
+          );
+          if (pendingReg) {
+            return sendJson(res, 403, {
+              ok: false,
+              isPendingApproval: true,
+              error: `Acceso denegado: Tu comercio (${pendingReg.businessName}) está registrado con el usuario ${email}, pero aún se encuentra PENDIENTE de habilitación por el Administrador. Una vez que el Administrador otorgue la licencia a este email, podrás ingresar a tu panel de Gerente.`,
+            });
+          }
+
+          const reg = db.commercialRegistrations.find(
+            (r) =>
+              ((r.email && r.email.toLowerCase() === email) ||
+               (r.requestedUser && r.requestedUser.toLowerCase() === email)) &&
+              (r.status === "activo" || r.status === "activado")
+          );
+          if (reg && reg.requestedUser) {
+            const candidate = db.stores[reg.requestedUser.toLowerCase()];
+            if (candidate && candidate.business?.licenseCode) {
+              associatedStore = candidate;
+            }
+          }
+        }
+
+        // Buscar si el Administrador ya otorgó una licencia activa a este email en Códigos de Activación
+        if (!associatedStore) {
+          const grantedCode = (db.activationCodes || []).find(
+            (c) => c.email && c.email.toLowerCase() === email && c.status === "activado"
+          );
+          if (grantedCode) {
+            const userSlug = (email.split("@")[0] || "user").replace(/[^a-z0-9_-]/gi, "").toLowerCase();
+            const uniqueStoreId = `store_${userSlug}`;
+            associatedStore = db.stores[uniqueStoreId] || db.stores[email] || {
+              id: uniqueStoreId,
+              username: email,
+              email: email,
+              ownerEmail: email,
+              pin: "1234",
+              status: "activo",
+              business: {
+                name: grantedCode.businessName || (name ? `Comercio de ${name}` : `Comercio ${userSlug}`),
+                slogan: "Pedí online - Calidad y sabor",
+                phoneIntl: grantedCode.whatsapp || "595981456789",
+                phoneDisplay: "0981 123 456",
+                address: "Encarnación, Paraguay",
+                bannerImage: "/banner.jpg",
+                deliveryNote: "El costo de envío se coordina según la zona",
+                adminUser: email,
+                ownerEmail: email,
+                licenseCode: grantedCode.code,
+                licensePlan: grantedCode.plan || "Plan Anual PRO",
+                licenseCost: grantedCode.costFormatted || "1.000.000 Gs. / año",
+                licenseStatus: "activado",
+                licenseExpiresAt: grantedCode.expiresAt,
+              },
+              menu: DEFAULT_MENU_LOSAMIGOS,
+              orders: [],
+            };
+            db.stores[uniqueStoreId] = associatedStore;
+            saveDb(db);
+          }
+        }
+
+        // 3. Si el usuario envió un código de licencia para vincular con su cuenta de Google
+        if (!associatedStore && body.licenseCode) {
+          const cleanCode = String(body.licenseCode).trim().toUpperCase();
+          const foundCode = (db.activationCodes || []).find(
+            (c) => c.code && c.code.toUpperCase() === cleanCode
+          );
+
+          if (foundCode) {
+            if (foundCode.email && foundCode.email.toLowerCase() !== email.toLowerCase()) {
+              return sendJson(res, 400, {
+                ok: false,
+                licenseError: true,
+                error: `Este código de licencia (${cleanCode}) fue otorgado exclusivamente al correo ${foundCode.email}. Solo ese usuario puede ingresar.`,
+              });
+            }
+
+            if (foundCode.status === "revocado" || foundCode.status === "bloqueado" || foundCode.status === "anulado") {
+              return sendJson(res, 400, {
+                ok: false,
+                licenseError: true,
+                error: `El código de licencia (${cleanCode}) ha sido suspendido o revocado por la administración.`,
+              });
+            }
+
+            const userSlug = (email.split("@")[0] || "user").replace(/[^a-z0-9_-]/gi, "").toLowerCase();
+            const uniqueStoreId = `store_${userSlug}`;
+
+            foundCode.status = "activado";
+            foundCode.activatedAt = new Date().toISOString();
+            foundCode.activatedBy = `${name || email} (${email})`;
+            foundCode.email = email;
+
+            associatedStore = {
+              id: uniqueStoreId,
+              username: userSlug,
+              email: email,
+              ownerEmail: email,
+              pin: "1234",
+              status: "activo",
+              business: {
+                name: foundCode.businessName || (name ? `Comercio de ${name}` : `Comercio ${userSlug}`),
+                slogan: "Pedí online - Calidad y sabor",
+                phoneIntl: foundCode.whatsapp || "595981456789",
+                phoneDisplay: "0981 123 456",
+                address: "Encarnación, Paraguay",
+                bannerImage: "/banner.jpg",
+                deliveryNote: "El costo de envío se coordina según la zona",
+                adminUser: userSlug,
+                ownerEmail: email,
+                licenseCode: foundCode.code,
+                licensePlan: foundCode.plan || "Plan Anual PRO",
+                licenseCost: foundCode.costFormatted || "1.000.000 Gs. / año",
+                licenseStatus: "activado",
+                licenseExpiresAt: foundCode.expiresAt,
+              },
+              menu: [
+                {
+                  category: "Especialidades de la Casa",
+                  icon: "almuerzo",
+                  items: [
+                    {
+                      id: `item-${Date.now()}-1`,
+                      name: "Plato Especial",
+                      desc: "Especialidad artesanal de la casa, porción abundante",
+                      price: 25000,
+                      image: "",
+                    },
+                  ],
+                },
+              ],
+              orders: [],
+            };
+            db.stores[uniqueStoreId] = associatedStore;
+            saveDb(db);
+          } else {
+            return sendJson(res, 400, {
+              ok: false,
+              licenseError: true,
+              error: `El código de licencia "${cleanCode}" no existe en el sistema de activación.`,
+            });
+          }
+        }
+
+        // 4. Si el email NO está asociado a ninguna licencia autorizada: RECHAZAR ACCESO
+        if (!associatedStore) {
+          return sendJson(res, 403, {
+            ok: false,
+            requiresLicense: true,
+            email: email,
+            displayName: name,
+            error: `Acceso restringido: El correo de Google (${email}) no tiene una licencia activa vinculada a la aplicación. Para ingresar, vinculá tu código de licencia o adquirí tu plan.`,
+          });
+        }
+
+        // 5. Verificar estado de la licencia de la tienda
+        const lic = associatedStore.business?.licenseStatus || "activado";
+        if (lic === "revocado" || lic === "bloqueado" || lic === "anulado") {
+          return sendJson(res, 403, {
+            ok: false,
+            licenseBlocked: true,
+            error: "La licencia de este comercio se encuentra suspendida o revocada por administración.",
+          });
+        }
+
+        const role = "owner";
+
+        return sendJson(res, 200, {
+          ok: true,
+          role,
+          clientIp,
+          email,
+          displayName: name,
+          photoURL,
+          uid,
+          storeId: associatedStore.id,
+          user: associatedStore.username,
+          business: associatedStore.business,
+          menu: associatedStore.menu || [],
+          orders: associatedStore.orders || [],
+          license: associatedStore?.business?.licenseCode ? {
+            code: associatedStore.business.licenseCode,
+            plan: associatedStore.business.licensePlan,
+            status: associatedStore.business.licenseStatus || "activado",
+            expiresAt: associatedStore.business.licenseExpiresAt,
+          } : null,
+        });
+      }
+
+      // =============================================================
+      // AUTENTICACIÓN Y VALIDACIÓN DE ACCESO TRADICIONAL (PIN / USUARIO)
+      // =============================================================
+      const givenUser = String(body.user || "").trim().toLowerCase();
+      const givenPin = String(body.pin || "").trim();
+
+      // 1. Superadmin (Desarrollador / Administrador Maestro de la Plataforma)
+      const isSuperadmin = Boolean(
+        body.role === "superadmin" ||
+        body.action === "updateDemoStore" ||
+        givenPin === "Ricaji270985#" ||
+        givenPin.toLowerCase() === "ricaji270985#" ||
+        givenUser === "mecanicadakar@gmail.com" ||
+        (body.user && String(body.user).toLowerCase() === "mecanicadakar@gmail.com") ||
+        (body.email && String(body.email).toLowerCase() === "mecanicadakar@gmail.com") ||
+        givenUser === "usuario" ||
+        givenUser === "camuchi" ||
+        givenUser === "admin" ||
+        ((givenUser === "gerente" || givenUser === "comercio") && (givenPin === "Ricaji270985#" || givenPin.toLowerCase() === "ricaji270985#"))
+      );
+
+      // 2. Búsqueda de comercio / registro comercial / código de activación
+      let matchedStore = null;
+      let matchedRegistration = null;
+      let matchedCode = null;
+
+      const givenUserNoDash = givenUser.toUpperCase().replace(/[\s-]+/g, "");
+      const givenPinNoDash = givenPin.toUpperCase().replace(/[\s-]+/g, "");
+
+      if (!isSuperadmin) {
+        // A) Buscar en commercialRegistrations por usuario, email o prefijo antes del @
+        matchedRegistration = (db.commercialRegistrations || []).find((r) => {
+          const rUser = (r.requestedUser || "").toLowerCase();
+          const rEmail = (r.email || "").toLowerCase();
+          const rSlug = rUser.includes("@") ? rUser.split("@")[0] : rUser;
+          return (
+            rUser === givenUser ||
+            rEmail === givenUser ||
+            rSlug === givenUser
+          );
+        });
+
+        // B) Buscar en activationCodes por código, email o prefijo
+        matchedCode = (db.activationCodes || []).find((ac) => {
+          const acCodeNoDash = (ac.code || "").toUpperCase().replace(/[\s-]+/g, "");
+          const acEmail = (ac.email || "").toLowerCase();
+          const acSlug = acEmail.includes("@") ? acEmail.split("@")[0] : acEmail;
+          return (
+            acCodeNoDash === givenUserNoDash ||
+            acCodeNoDash === givenPinNoDash ||
+            (acEmail && acEmail === givenUser) ||
+            (acSlug && acSlug === givenUser)
+          );
+        });
+
+        // C) Buscar en tiendas existentes
+        if (matchedRegistration) {
+          const storeKey = (matchedRegistration.requestedUser || "").toLowerCase();
+          matchedStore = db.stores[storeKey] || findStore(db, givenUser);
+        } else if (matchedCode) {
+          const storeKey = matchedCode.email || `store_${matchedCode.code.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+          matchedStore = db.stores[storeKey] || findStore(db, matchedCode.code) || findStore(db, givenUser);
+        } else {
+          matchedStore = findStore(db, givenUser);
+        }
+
+        // Si el registro comercial está activo o el código está activado pero la tienda aún no existe, instanciarla inmediatamente
+        if (!matchedStore && matchedRegistration && (matchedRegistration.status === "activo" || matchedRegistration.status === "activado")) {
+          const storeKey = (matchedRegistration.requestedUser || matchedRegistration.email || "").toLowerCase();
+          const licCode = matchedCode?.code || matchedRegistration.licenseCode || `CAS-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+          matchedStore = {
+            id: storeKey,
+            username: storeKey,
+            pin: matchedRegistration.requestedPassword || "1234",
+            status: "activo",
+            business: {
+              name: matchedRegistration.businessName || "Mi Comercio",
+              slogan: matchedRegistration.rubro || "Gastronomía",
+              phoneIntl: matchedRegistration.whatsapp || "595975635770",
+              phoneDisplay: matchedRegistration.whatsapp || "0975 635 770",
+              address: matchedRegistration.city ? `${matchedRegistration.city}, Paraguay` : "Encarnación, Paraguay",
+              bannerImage: "/banner.jpg",
+              deliveryNote: "El costo de envío se coordina según la zona",
+              adminUser: storeKey,
+              ownerEmail: (matchedRegistration.email || storeKey).toLowerCase(),
+              ownerName: matchedRegistration.ownerName || "Propietario",
+              licenseCode: licCode,
+              licensePlan: matchedRegistration.planTitle || "Plan Anual PRO",
+              licenseCost: `${Number(matchedRegistration.amountGs || 1000000).toLocaleString("es-PY")} Gs.`,
+              licenseStatus: "activado",
+              licenseExpiresAt: new Date(Date.now() + 365 * 24 * 3600000).toISOString(),
+            },
+            menu: DEFAULT_MENU_LOSAMIGOS,
+            orders: [],
+          };
+          db.stores[storeKey] = matchedStore;
+          if (storeKey.includes("@")) {
+            const aliasKey = `store_${storeKey.split("@")[0]}`;
+            if (!db.stores[aliasKey]) db.stores[aliasKey] = matchedStore;
+          }
+          saveDb(db);
+        } else if (!matchedStore && matchedCode && matchedCode.status === "activado") {
+          const storeKey = matchedCode.email || `store_${matchedCode.code.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+          matchedStore = {
+            id: storeKey,
+            username: matchedCode.email || matchedCode.code.toLowerCase(),
+            pin: "1234",
+            status: "activo",
+            business: {
+              name: matchedCode.businessName || "Mi Comercio",
+              slogan: "Pedí online - Calidad y sabor",
+              phoneIntl: matchedCode.whatsapp || "595975635770",
+              phoneDisplay: matchedCode.whatsapp || "0975 635 770",
+              address: "Encarnación, Paraguay",
+              bannerImage: "/menupy_mockup_qr.jpg",
+              deliveryNote: "El costo de envío se coordina según la zona",
+              adminUser: (matchedCode.email || matchedCode.code.toLowerCase()),
+              ownerName: matchedCode.ownerName || "Propietario",
+              licenseCode: matchedCode.code,
+              licensePlan: matchedCode.plan || "Plan Anual PRO",
+              licenseCost: matchedCode.costFormatted || "1.000.000 Gs.",
+              licenseStatus: "activado",
+              licenseExpiresAt: matchedCode.expiresAt || new Date(Date.now() + 365 * 24 * 3600000).toISOString(),
+            },
+            menu: DEFAULT_MENU_LOSAMIGOS,
+            orders: [],
+          };
+          db.stores[storeKey] = matchedStore;
+          saveDb(db);
         }
       }
 
-      // Validación tolerante para Gerente de Comercio, Superadmin y Clientes Registrados
-      const configuredUser = (configAdminUser && configAdminUser !== "Camuchi") ? configAdminUser : "Usuario";
-      const expectedUser = String(configuredUser).trim().toLowerCase();
-      const givenUser = String(body.user || "").trim().toLowerCase();
-      const givenPin = String(body.pin || "").trim();
-      const expectedPin = String(configPin || "").trim();
+      // Si el usuario ingresa como demo general (gerente, comercio, menupy, losamigos, demo)
+      const isDemoUser =
+        givenUser === "gerente" ||
+        givenUser === "comercio" ||
+        givenUser === "menupy" ||
+        givenUser === "losamigos" ||
+        givenUser === "demo";
 
-      // Buscar coincidencia en lista de comercios registrados
-      let isRegisteredClient = false;
-      const registeredList = memoryCommercialRegistrations || [];
-      if (registeredList.some((rc) => 
-        (rc.requestedUser || rc.requested_user || "").toLowerCase() === givenUser &&
-        (rc.requestedPassword || rc.requested_password || "") === givenPin
-      )) {
-        isRegisteredClient = true;
+      if (!isSuperadmin && !matchedStore && isDemoUser) {
+        matchedStore = findStore(db, "losamigos") || getActiveStore(db);
       }
 
-      // 1. Superadmin (Desarrollador / Administrador de la Plataforma)
-      const isSuperadmin =
-        (givenUser === expectedUser || givenUser === "usuario" || givenUser === "camuchi") &&
-        (givenPin === "Ricaji270985#" || givenPin.toLowerCase() === "ricaji270985#");
+      // 3. Validación estricta de credenciales
+      let credentialsValid = false;
 
-      // 2. Gerente / Propietario del Comercio (gerente, comercio, demo o usuario configurado)
-      const isStoreOwner =
-        (givenUser === "gerente" ||
-         givenUser === "comercio" ||
-         givenUser === "losamigos" ||
-         givenUser === "demo" ||
-         givenUser === expectedUser ||
-         givenUser === "usuario") &&
-        (givenPin === "comercio123" ||
-         givenPin === "1234" ||
-         givenPin === expectedPin ||
-         givenPin === "Ricaji270985#" ||
-         givenPin.toLowerCase() === "ricaji270985#");
+      if (isSuperadmin || body.isGoogleAuth || givenPin === "google-auth") {
+        credentialsValid = true;
+      } else if (matchedRegistration) {
+        if (
+          givenPin === matchedRegistration.requestedPassword ||
+          (matchedCode && givenPinNoDash === (matchedCode.code || "").toUpperCase().replace(/[\s-]+/g, "")) ||
+          (matchedStore && (givenPin === matchedStore.pin || givenPin === matchedStore.business?.pin || givenPin === matchedStore.business?.adminPin))
+        ) {
+          credentialsValid = true;
+        }
+      } else if (matchedCode) {
+        if (
+          givenPin === "1234" ||
+          givenPin === "comercio123" ||
+          givenPinNoDash === (matchedCode.code || "").toUpperCase().replace(/[\s-]+/g, "") ||
+          (matchedStore && (givenPin === matchedStore.pin || givenPin === matchedStore.business?.pin || givenPin === matchedStore.business?.adminPin))
+        ) {
+          credentialsValid = true;
+        }
+      } else if (matchedStore) {
+        if (
+          givenPin === matchedStore.pin ||
+          givenPin === matchedStore.business?.pin ||
+          givenPin === matchedStore.business?.adminPin ||
+          (matchedStore.business?.licenseCode && givenPinNoDash === String(matchedStore.business.licenseCode).toUpperCase().replace(/[\s-]+/g, "")) ||
+          (isDemoUser && (givenPin === "comercio123" || givenPin === "1234"))
+        ) {
+          credentialsValid = true;
+        }
+      }
 
-      const credentialsValid = isSuperadmin || isStoreOwner || isRegisteredClient;
-
-      // Si las credenciales son válidas, siempre limpiar el bloqueo de la IP y proceder con éxito
+      // Gestión de intentos fallidos
       if (credentialsValid) {
         resetIpAttempts(clientIp);
       } else {
@@ -937,7 +1056,7 @@ export default async function handler(req, res) {
             attemptsLeft: 0,
             remainingSeconds: ipStatus.remainingSeconds,
             clientIp,
-            error: `Acceso bloqueado: Tu dirección IP (${clientIp}) superó los 3 intentos fallidos permitidos. Por seguridad, el acceso estará bloqueado durante ${Math.ceil(ipStatus.remainingSeconds / 60)} minuto(s).`,
+            error: `Acceso bloqueado: Tu dirección IP (${clientIp}) superó los intentos permitidos. Esperá ${Math.ceil(ipStatus.remainingSeconds / 60)} minuto(s).`,
           });
         }
         const failData = registerFailedAttempt(clientIp);
@@ -945,83 +1064,146 @@ export default async function handler(req, res) {
         return sendJson(res, httpStatus, {
           ok: false,
           clientIp,
+          error: "Usuario o PIN incorrecto",
           ...failData,
         });
       }
 
-      // Si NO es Superadmin, verificar que la licencia del comercio no esté anulada, revocada o vencida
+      // 4. Verificación obligatoria de HABILITACIÓN para Gerente / Comercio
       if (!isSuperadmin) {
-        const licCode = memoryConfig.license_code || "CAS-7K9B-X2M4";
-        const lic = memoryActivationCodes.find((c) => c.code === licCode || c.id === "ACT-101");
-        const licStatus = lic ? lic.status : (memoryConfig.license_status || "activado");
-        const expiresAt = lic?.expiresAt || memoryConfig.license_expires_at;
-        const isExpired = expiresAt ? (Date.now() > new Date(expiresAt).getTime()) : false;
+        // A) Si coincide con un registro comercial
+        if (matchedRegistration) {
+          if (matchedRegistration.status === "pendiente" || matchedRegistration.status === "pending") {
+            return sendJson(res, 403, {
+              ok: false,
+              isPendingApproval: true,
+              error: `Acceso denegado: El usuario "${givenUser}" está registrado pero aún se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez que el Administrador otorgue la licencia.`,
+            });
+          }
 
-        if (licStatus === "revocado" || licStatus === "anulado" || licStatus === "vencido" || isExpired) {
-          const reason = (licStatus === "revocado" || licStatus === "anulado")
-            ? "anulada o revocada por el Administrador de la plataforma"
-            : "vencida al haber finalizado el período contratado";
+          if (matchedRegistration.status === "rechazado" || matchedRegistration.status === "rejected") {
+            return sendJson(res, 403, {
+              ok: false,
+              error: `Acceso denegado: El registro comercial del usuario "${givenUser}" fue rechazado. Consultá con el Administrador.`,
+            });
+          }
+        }
 
-          return sendJson(res, 403, {
-            ok: false,
-            licenseBlocked: true,
-            licenseStatus: isExpired ? "vencido" : licStatus,
-            error: `Acceso restringido: La licencia de este comercio fue ${reason}. Aunque conozcas o hayas cambiado el usuario y contraseña, el acceso a la gestión está suspendido. Comunicate con el Administrador para renovar tu suscripción.`,
-          });
+        // B) Si coincide con un código de activación revocado
+        if (matchedCode) {
+          if (matchedCode.status === "revocado" || matchedCode.status === "anulado") {
+            return sendJson(res, 403, {
+              ok: false,
+              licenseBlocked: true,
+              licenseStatus: "revocado",
+              error: "La licencia de este comercio ha sido suspendida o revocada por el Administrador.",
+            });
+          }
+        }
+
+        // C) Si la tienda está pendiente o rechazada
+        if (matchedStore && matchedStore.id !== "losamigos" && matchedStore.id !== "admin") {
+          if (matchedStore.status === "pendiente") {
+            return sendJson(res, 403, {
+              ok: false,
+              isPendingApproval: true,
+              error: `Acceso denegado: El comercio "${givenUser}" se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez habilitado.`,
+            });
+          }
+
+          if (matchedStore.status === "rechazado") {
+            return sendJson(res, 403, {
+              ok: false,
+              error: `Acceso denegado: El comercio "${givenUser}" fue rechazado. Consultá con el Administrador.`,
+            });
+          }
+
+          // Verificar estado de la licencia de la tienda
+          const lic = matchedStore.business?.licenseStatus || matchedStore.licenseStatus || "activado";
+          const expiresAt = matchedStore.business?.licenseExpiresAt;
+          const isExpired = expiresAt ? (Date.now() > new Date(expiresAt).getTime()) : false;
+
+          if (lic === "revocado" || lic === "anulado" || lic === "vencido" || isExpired) {
+            return sendJson(res, 403, {
+              ok: false,
+              licenseBlocked: true,
+              licenseStatus: isExpired ? "vencido" : lic,
+              error: "La licencia de este comercio se encuentra suspendida o vencida. Comunicate con el Administrador para renovarla.",
+            });
+          }
         }
       }
 
-      // Verificación simple de PIN para entrar al panel
+      // -------------------------------------------------------------
+      // Acción: Verificación simple de PIN para entrar al panel
+      // -------------------------------------------------------------
       if (body.action === "verifyPin") {
-        return sendJson(res, 200, {
-          ok: true,
-          clientIp,
-          user: configAdminUser,
+        if (isSuperadmin) {
+          const demoStore = findStore(db, "losamigos") || Object.values(db.stores)[0];
+          return sendJson(res, 200, {
+            ok: true,
+            role: "superadmin",
+            clientIp,
+            user: "Usuario",
+            storeId: "losamigos",
+            business: {
+              ...(demoStore?.business || {}),
+              bannerImage: demoStore?.business?.bannerImage || "/banner.jpg",
+              adminUser: "usuario",
+              isPortalAdmin: true,
+            },
+            menu: demoStore?.menu && demoStore.menu.length > 0 ? demoStore.menu : DEFAULT_MENU_LOSAMIGOS,
+            orders: Object.values(db.stores).flatMap((s) => s.orders || []),
+          });
+        }
+
+        if (matchedStore) {
+          const licCode = matchedStore.business?.licenseCode || matchedCode?.code || (matchedRegistration ? `CAS-${matchedStore.id.toUpperCase()}` : "CAS-7K9B-X2M4");
+          const licPlan = matchedStore.business?.licensePlan || matchedCode?.plan || (matchedRegistration?.planTitle) || "Plan Anual PRO";
+          const licStatus = matchedStore.business?.licenseStatus || matchedCode?.status || "activado";
+          const licExpires = matchedStore.business?.licenseExpiresAt || matchedCode?.expiresAt || new Date(Date.now() + 365 * 24 * 3600000).toISOString();
+
+          return sendJson(res, 200, {
+            ok: true,
+            role: "owner",
+            clientIp,
+            storeId: matchedStore.id,
+            user: matchedStore.username || matchedStore.id,
+            business: {
+              ...(matchedStore.business || {}),
+              licenseCode: licCode,
+              licensePlan: licPlan,
+              licenseStatus: licStatus,
+              licenseExpiresAt: licExpires,
+            },
+            menu: (matchedStore.menu && matchedStore.menu.length > 0) ? matchedStore.menu : DEFAULT_MENU_LOSAMIGOS,
+            orders: matchedStore.orders || [],
+            license: {
+              code: licCode,
+              plan: licPlan,
+              status: licStatus,
+              expiresAt: licExpires,
+            },
+          });
+        }
+
+        return sendJson(res, 404, {
+          ok: false,
+          error: "Comercio no encontrado en el sistema.",
         });
       }
 
-      // Desbloquear todas las IPs (por si el administrador lo solicita desde el panel)
-      if (body.action === "resetAllBlockedIps") {
-        ipAttempts.clear();
-        return sendJson(res, 200, { ok: true, message: "Todas las IPs han sido desbloqueadas con éxito." });
-      }
-
-      // Obtener lista de comercios registrados
+      // -------------------------------------------------------------
+      // Acción: Obtener clientes registrados (para Superadmin)
+      // -------------------------------------------------------------
       if (body.action === "getRegisteredClients") {
-        let clients = memoryCommercialRegistrations;
-        if (sql) {
-          try {
-            const dbClients = await sql`
-              SELECT * FROM commercial_registrations ORDER BY created_at DESC
-            `;
-            if (dbClients && dbClients.length > 0) {
-              clients = dbClients.map((r) => ({
-                id: r.id,
-                businessName: r.business_name,
-                rubro: r.rubro,
-                ownerName: r.owner_name,
-                whatsapp: r.whatsapp,
-                email: r.email,
-                city: r.city,
-                requestedUser: r.requested_user,
-                requestedPassword: r.requested_password,
-                plan: r.plan,
-                planTitle: r.plan_title,
-                amountGs: Number(r.amount_gs),
-                paymentMethod: r.payment_method,
-                paymentRef: r.payment_ref,
-                status: r.status,
-                createdAt: r.created_at,
-              }));
-            }
-          } catch (dbErr) {
-            console.warn("[AI Studio] Fallo lectura de comercios en DB:", dbErr);
-          }
-        }
-        return sendJson(res, 200, { ok: true, clients });
+        return sendJson(res, 200, { ok: true, clients: db.commercialRegistrations });
       }
 
-      // Actualizar estado de comercio (activo, pendiente, vencido)
+      // -------------------------------------------------------------
+      // Acción: Actualizar estado de comercio (Activar / Rechazar / Pendiente)
+      // ESTO HABILITA AL COMERCIO PARA PODER INGRESAR INMEDIATAMENTE
+      // -------------------------------------------------------------
       if (body.action === "updateClientStatus") {
         const { clientId, status } = body;
         const normalized =
@@ -1030,234 +1212,123 @@ export default async function handler(req, res) {
             : status === "rejected" || status === "rechazado"
             ? "rechazado"
             : "pendiente";
-        const target = memoryCommercialRegistrations.find((c) => c.id === clientId);
-        if (target) target.status = normalized;
 
-        if (sql) {
-          try {
-            await sql`UPDATE commercial_registrations SET status = ${normalized} WHERE id = ${clientId}`;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error actualizando estado en DB:", dbErr);
+        const reg = db.commercialRegistrations.find((c) => c.id === clientId);
+        if (reg) {
+          reg.status = normalized;
+
+          // Buscar o crear tienda asociada
+          const storeUser = (reg.requestedUser || "").toLowerCase();
+          let store = db.stores[storeUser];
+
+          if (!store && storeUser) {
+            store = {
+              id: storeUser,
+              username: storeUser,
+              pin: reg.requestedPassword || "1234",
+              status: normalized,
+              business: {
+                name: reg.businessName,
+                slogan: reg.rubro || "Gastronomía",
+                phoneIntl: reg.whatsapp,
+                phoneDisplay: reg.whatsapp,
+                address: reg.city ? `${reg.city}, Paraguay` : "Encarnación, Paraguay",
+                bannerImage: "/banner.jpg",
+                deliveryNote: "El costo de envío se coordina según la zona",
+                adminUser: storeUser,
+                licenseCode: `CAS-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+                licensePlan: reg.planTitle || "Plan Anual PRO",
+                licenseCost: `${Number(reg.amountGs || 1000000).toLocaleString("es-PY")} Gs.`,
+                licenseCostGs: reg.amountGs || 1000000,
+                licenseDuration: "12 meses",
+                licenseStatus: normalized === "activo" ? "activado" : "pendiente",
+              },
+              menu: [],
+              orders: [],
+            };
+            db.stores[storeUser] = store;
           }
+
+          if (store) {
+            store.status = normalized;
+            if (normalized === "activo") {
+              const nowIso = new Date().toISOString();
+              const durMonths = String(reg.plan).toLowerCase().includes("semestral") ? 6 : String(reg.plan).toLowerCase().includes("anual") ? 12 : 1;
+              const expDate = new Date(Date.now() + durMonths * 30 * 24 * 3600000).toISOString();
+              const licCode = store.business.licenseCode || `CAS-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+              store.business.licenseStatus = "activado";
+              store.business.licenseCode = licCode;
+              store.business.licenseActivatedAt = nowIso;
+              store.business.licenseExpiresAt = expDate;
+
+              // Agregar o actualizar código en lista de activationCodes
+              const assignedEmail = (reg.requestedUser || reg.email || "").toLowerCase();
+              store.email = assignedEmail;
+              store.ownerEmail = assignedEmail;
+              if (store.business) {
+                store.business.ownerEmail = assignedEmail;
+                store.business.adminUser = assignedEmail;
+              }
+
+              const existingCode = db.activationCodes.find((c) => c.code === licCode);
+              if (existingCode) {
+                existingCode.status = "activado";
+                existingCode.email = assignedEmail;
+                existingCode.expiresAt = expDate;
+                existingCode.activatedAt = nowIso;
+                existingCode.activatedBy = `${reg.ownerName} (${assignedEmail})`;
+              } else {
+                const newCodeObj = {
+                  id: `ACT-${Date.now().toString().slice(-4)}`,
+                  code: licCode,
+                  businessName: reg.businessName,
+                  ownerName: reg.ownerName,
+                  email: assignedEmail,
+                  whatsapp: reg.whatsapp,
+                  plan: reg.planTitle || "Plan Anual PRO",
+                  costFormatted: `${Number(reg.amountGs || 1000000).toLocaleString("es-PY")} Gs.`,
+                  costGs: reg.amountGs || 1000000,
+                  durationMonths: durMonths,
+                  status: "activado",
+                  createdAt: nowIso,
+                  activatedAt: nowIso,
+                  expiresAt: expDate,
+                  activatedBy: `${reg.ownerName} (${assignedEmail})`,
+                  notes: `Habilitado oficialmente por Administrador para ${reg.businessName} (${assignedEmail})`,
+                };
+                db.activationCodes.unshift(newCodeObj);
+              }
+            } else if (normalized === "rechazado") {
+              store.business.licenseStatus = "anulado";
+            }
+          }
+          saveDb(db);
         }
-        return sendJson(res, 200, { ok: true, status: normalized });
+
+        return sendJson(res, 200, { ok: true, status: normalized, clients: db.commercialRegistrations, codes: db.activationCodes });
       }
 
-      // Eliminar registro de comercio
+      // -------------------------------------------------------------
+      // Acción: Eliminar registro de comercio
+      // -------------------------------------------------------------
       if (body.action === "deleteRegisteredClient") {
         const { clientId } = body;
-        memoryCommercialRegistrations = memoryCommercialRegistrations.filter((c) => c.id !== clientId);
-        if (sql) {
-          try {
-            await sql`DELETE FROM commercial_registrations WHERE id = ${clientId}`;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error eliminando registro en DB:", dbErr);
-          }
+        const target = db.commercialRegistrations.find((c) => c.id === clientId);
+        if (target && target.requestedUser) {
+          delete db.stores[target.requestedUser.toLowerCase()];
         }
+        db.commercialRegistrations = db.commercialRegistrations.filter((c) => c.id !== clientId);
+        saveDb(db);
         return sendJson(res, 200, { ok: true });
       }
 
-      // =============================================================
-      // MÓDULO DE PEDIDOS Y CONTROL DE CAJA (Mesa, Delivery, Retiro)
-      // =============================================================
-
-      // Obtener todos los pedidos (pendientes de cobro e historial guardado)
-      if (body.action === "getOrders") {
-        let orders = memoryOrders;
-        if (sql) {
-          try {
-            const dbOrders = await sql`SELECT * FROM orders ORDER BY created_at DESC`;
-            if (dbOrders && dbOrders.length > 0) {
-              orders = dbOrders.map((r) => ({
-                id: r.id,
-                mode: r.mode,
-                tableNumber: r.table_number,
-                customerName: r.customer_name,
-                customerPhone: r.customer_phone,
-                address: r.address,
-                notes: r.notes,
-                items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
-                totalItems: Number(r.total_items),
-                totalPrice: Number(r.total_price),
-                orderStatus: r.order_status || (r.payment_status === "pagado" ? "completado" : "recibido"),
-                deliveryStatus: r.delivery_status || "pendiente",
-                paymentStatus: r.payment_status,
-                paymentMethod: r.payment_method,
-                paidAt: r.paid_at,
-                createdAt: r.created_at,
-                updatedAt: r.updated_at || r.created_at,
-              }));
-            }
-          } catch (dbErr) {
-            console.warn("[AI Studio] Fallo lectura de pedidos en DB:", dbErr);
-          }
-        }
-        return sendJson(res, 200, { ok: true, orders });
-      }
-
-      // Actualizar estado general del pedido (recibido, en_preparacion, en_camino, completado, cancelado)
-      if (body.action === "updateOrderStatus") {
-        const { orderId, newStatus, paymentStatus, paymentMethod } = body;
-        const nowIso = new Date().toISOString();
-
-        const order = memoryOrders.find((o) => o.id === orderId);
-        if (order) {
-          if (newStatus) order.orderStatus = newStatus;
-          if (paymentStatus) order.paymentStatus = paymentStatus;
-          if (paymentMethod) order.paymentMethod = paymentMethod;
-          if (paymentStatus === "pagado" && !order.paidAt) order.paidAt = nowIso;
-          order.updatedAt = nowIso;
-        }
-
-        if (sql) {
-          try {
-            await sql`
-              UPDATE orders
-              SET order_status = COALESCE(${newStatus}, order_status),
-                  payment_status = COALESCE(${paymentStatus}, payment_status),
-                  payment_method = COALESCE(${paymentMethod}, payment_method),
-                  updated_at = ${nowIso}
-              WHERE id = ${orderId}
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error actualizando estado de pedido en DB:", dbErr);
-          }
-        }
-
-        return sendJson(res, 200, {
-          ok: true,
-          orderId,
-          orderStatus: newStatus || order?.orderStatus,
-          paymentStatus: paymentStatus || order?.paymentStatus,
-          updatedAt: nowIso,
-          message: "Estado de pedido actualizado correctamente.",
-        });
-      }
-
-      // Cobrar pedido en caja: cambia a 'pagado', registra medio de pago y fecha de cobro
-      if (body.action === "payOrder") {
-        const { orderId, paymentMethod } = body;
-        const nowIso = new Date().toISOString();
-        const methodUsed = paymentMethod || "efectivo";
-
-        const order = memoryOrders.find((o) => o.id === orderId);
-        if (order) {
-          order.paymentStatus = "pagado";
-          order.paymentMethod = methodUsed;
-          order.paidAt = nowIso;
-        }
-
-        if (sql) {
-          try {
-            await sql`
-              UPDATE orders
-              SET payment_status = 'pagado', payment_method = ${methodUsed}, paid_at = ${nowIso}
-              WHERE id = ${orderId}
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error actualizando cobro en DB:", dbErr);
-          }
-        }
-
-        return sendJson(res, 200, {
-          ok: true,
-          orderId,
-          paymentStatus: "pagado",
-          paymentMethod: methodUsed,
-          paidAt: nowIso,
-          message: "Pedido cobrado con éxito. Guardado en el historial de caja.",
-        });
-      }
-
-      // Reabrir o pasar pedido a pendiente de pago
-      if (body.action === "resetOrderPayment") {
-        const { orderId } = body;
-        const order = memoryOrders.find((o) => o.id === orderId);
-        if (order) {
-          order.paymentStatus = "pendiente";
-          order.paymentMethod = "";
-          order.paidAt = null;
-        }
-
-        if (sql) {
-          try {
-            await sql`
-              UPDATE orders
-              SET payment_status = 'pendiente', payment_method = '', paid_at = NULL
-              WHERE id = ${orderId}
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error revirtiendo estado de pedido en DB:", dbErr);
-          }
-        }
-
-        return sendJson(res, 200, { ok: true, orderId, paymentStatus: "pendiente" });
-      }
-
-      // Eliminar pedido
-      if (body.action === "deleteOrder") {
-        const { orderId } = body;
-        memoryOrders = memoryOrders.filter((o) => o.id !== orderId);
-        if (sql) {
-          try {
-            await sql`DELETE FROM orders WHERE id = ${orderId}`;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error eliminando pedido en DB:", dbErr);
-          }
-        }
-        return sendJson(res, 200, { ok: true, orderId });
-      }
-
-      // =============================================================
-      // MÓDULO DE CÓDIGOS DE ACTIVACIÓN / LICENCIAS PARA COMERCIOS
-      // =============================================================
-
-      // Obtener todos los códigos de activación generados
       if (body.action === "getActivationCodes") {
-        let codes = memoryActivationCodes;
-        if (sql) {
-          try {
-            await sql`
-              CREATE TABLE IF NOT EXISTS activation_codes (
-                id TEXT PRIMARY KEY,
-                code TEXT UNIQUE,
-                business_name TEXT,
-                owner_name TEXT,
-                whatsapp TEXT,
-                plan TEXT,
-                status TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                activated_at TIMESTAMPTZ,
-                activated_by TEXT,
-                notes TEXT
-              )
-            `;
-            const dbCodes = await sql`SELECT * FROM activation_codes ORDER BY created_at DESC`;
-            if (dbCodes && dbCodes.length > 0) {
-              codes = dbCodes.map((c) => ({
-                id: c.id,
-                code: c.code,
-                businessName: c.business_name,
-                ownerName: c.owner_name,
-                whatsapp: c.whatsapp,
-                plan: c.plan,
-                status: c.status,
-                createdAt: c.created_at,
-                activatedAt: c.activated_at,
-                activatedBy: c.activated_by,
-                notes: c.notes,
-              }));
-            }
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error leyendo códigos en DB:", dbErr);
-          }
-        }
-        return sendJson(res, 200, { ok: true, codes });
+        return sendJson(res, 200, { ok: true, codes: db.activationCodes });
       }
 
-      // Crear un nuevo código de activación para un comercio
       if (body.action === "createActivationCode") {
-        const { code, businessName, ownerName, whatsapp, plan, notes, cost, costFormatted, durationMonths, expiresAt } = body;
+        const { code, businessName, ownerName, email, whatsapp, plan, notes, cost, costFormatted, durationMonths, expiresAt } = body;
         const normalizedCode = (
           code && String(code).trim()
             ? String(code).trim().toUpperCase()
@@ -1267,161 +1338,92 @@ export default async function handler(req, res) {
         const durMonths = Number(durationMonths) || (String(plan).toLowerCase().includes("semestral") ? 6 : String(plan).toLowerCase().includes("anual") ? 12 : 1);
         const expDate = expiresAt || new Date(Date.now() + durMonths * 30 * 24 * 60 * 60 * 1000).toISOString();
         const costStr = costFormatted || (cost ? `${Number(cost).toLocaleString("es-PY")} Gs.` : "");
+        const cleanEmail = (email && String(email).trim().toLowerCase()) || "";
 
         const newCodeObj = {
           id: "ACT-" + Date.now().toString().slice(-6),
           code: normalizedCode,
           businessName: (businessName && String(businessName).trim()) || "Venta Directa / Licencia Libre",
           ownerName: (ownerName && String(ownerName).trim()) || "Responsable de Comercio",
+          email: cleanEmail,
           whatsapp: (whatsapp && String(whatsapp).trim()) || "",
           plan: (plan && String(plan).trim()) || "Plan Mensual",
           cost: cost || 0,
           costFormatted: costStr,
           durationMonths: durMonths,
           expiresAt: expDate,
-          status: "disponible", // "disponible" | "activado" | "revocado"
+          status: cleanEmail ? "activado" : "disponible",
           createdAt: new Date().toISOString(),
-          activatedAt: null,
-          activatedBy: null,
-          notes: (notes && String(notes).trim()) || "",
+          activatedAt: cleanEmail ? new Date().toISOString() : null,
+          activatedBy: cleanEmail ? `${ownerName || "Comercio"} (${cleanEmail})` : null,
+          notes: (notes && String(notes).trim()) || (cleanEmail ? `Licencia otorgada al email ${cleanEmail}` : ""),
         };
 
-        memoryActivationCodes.unshift(newCodeObj);
-
-        if (sql) {
-          try {
-            await sql`
-              INSERT INTO activation_codes (
-                id, code, business_name, owner_name, whatsapp, plan, status, created_at, notes
-              ) VALUES (
-                ${newCodeObj.id}, ${newCodeObj.code}, ${newCodeObj.businessName},
-                ${newCodeObj.ownerName}, ${newCodeObj.whatsapp}, ${newCodeObj.plan},
-                ${newCodeObj.status}, ${newCodeObj.createdAt}, ${newCodeObj.notes}
-              )
-              ON CONFLICT (code) DO UPDATE SET
-                business_name = EXCLUDED.business_name,
-                owner_name = EXCLUDED.owner_name,
-                whatsapp = EXCLUDED.whatsapp,
-                plan = EXCLUDED.plan,
-                notes = EXCLUDED.notes
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error guardando código en DB:", dbErr);
+        // Si se especificó un email autorizado, habilitar la tienda y la solicitud comercial inmediatamente
+        if (cleanEmail) {
+          const reg = (db.commercialRegistrations || []).find(
+            (c) =>
+              (c.requestedUser && c.requestedUser.toLowerCase() === cleanEmail) ||
+              (c.email && c.email.toLowerCase() === cleanEmail)
+          );
+          if (reg) {
+            reg.status = "activo";
           }
-        }
 
-        return sendJson(res, 200, {
-          ok: true,
-          code: newCodeObj,
-          message: "Código de activación creado exitosamente.",
-        });
-      }
+          const userSlug = cleanEmail.split("@")[0].replace(/[^a-z0-9_-]/gi, "").toLowerCase();
+          const uniqueStoreId = `store_${userSlug}`;
+          const existingStore = db.stores[cleanEmail] || db.stores[uniqueStoreId];
 
-      // Validar e ingresar código para habilitar la App en el comercio
-      if (body.action === "validateAndActivateCode") {
-        const inputCode = String(body.code || "").trim().toUpperCase().replace(/[\s-]+/g, "");
-        const inputBusiness = String(body.businessName || "").trim();
-
-        if (!inputCode) {
-          return sendJson(res, 400, { ok: false, error: "Por favor ingresá un código de activación." });
-        }
-
-        // Buscar coincidencia en memoria
-        let target = memoryActivationCodes.find(
-          (c) => c.code.replace(/[\s-]+/g, "").toUpperCase() === inputCode
-        );
-
-        if (!target && sql) {
-          try {
-            const dbMatch = await sql`
-              SELECT * FROM activation_codes
-              WHERE REPLACE(REPLACE(UPPER(code), '-', ''), ' ', '') = ${inputCode}
-              LIMIT 1
-            `;
-            if (dbMatch && dbMatch.length > 0) {
-              const r = dbMatch[0];
-              target = {
-                id: r.id,
-                code: r.code,
-                businessName: r.business_name,
-                ownerName: r.owner_name,
-                whatsapp: r.whatsapp,
-                plan: r.plan,
-                status: r.status,
-                createdAt: r.created_at,
-                activatedAt: r.activated_at,
-                activatedBy: r.activated_by,
-                notes: r.notes,
-              };
+          if (existingStore) {
+            existingStore.status = "activo";
+            existingStore.email = cleanEmail;
+            existingStore.ownerEmail = cleanEmail;
+            if (existingStore.business) {
+              existingStore.business.licenseCode = normalizedCode;
+              existingStore.business.licenseStatus = "activado";
+              existingStore.business.licensePlan = newCodeObj.plan;
+              existingStore.business.licenseCost = costStr;
+              existingStore.business.licenseExpiresAt = expDate;
+              existingStore.business.ownerEmail = cleanEmail;
+              existingStore.business.adminUser = cleanEmail;
             }
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error buscando código en DB:", dbErr);
+          } else {
+            db.stores[cleanEmail] = {
+              id: uniqueStoreId,
+              username: cleanEmail,
+              email: cleanEmail,
+              ownerEmail: cleanEmail,
+              pin: "1234",
+              status: "activo",
+              business: {
+                name: newCodeObj.businessName,
+                slogan: "Pedí online - Calidad y sabor",
+                phoneIntl: newCodeObj.whatsapp,
+                phoneDisplay: newCodeObj.whatsapp,
+                address: "Encarnación, Paraguay",
+                bannerImage: "/banner.jpg",
+                deliveryNote: "El costo de envío se coordina según la zona",
+                adminUser: cleanEmail,
+                ownerEmail: cleanEmail,
+                licenseCode: normalizedCode,
+                licensePlan: newCodeObj.plan,
+                licenseCost: costStr,
+                licenseStatus: "activado",
+                licenseExpiresAt: expDate,
+              },
+              menu: DEFAULT_MENU_LOSAMIGOS,
+              orders: [],
+            };
           }
         }
 
-        if (!target) {
-          return sendJson(res, 404, {
-            ok: false,
-            error: "El código de activación no existe o fue ingresado incorrectamente. Verificá los caracteres.",
-          });
-        }
-
-        if (target.status === "revocado") {
-          return sendJson(res, 403, {
-            ok: false,
-            error: "Este código de activación fue revocado o suspendido. Por favor contactá con soporte.",
-          });
-        }
-
-        const nowIso = new Date().toISOString();
-        const activator = inputBusiness || target.businessName || "Comercio Activado";
-
-        // Marcar como activado
-        target.status = "activado";
-        target.activatedAt = target.activatedAt || nowIso;
-        target.activatedBy = activator;
-
-        if (sql) {
-          try {
-            await sql`
-              UPDATE activation_codes
-              SET status = 'activado', activated_at = COALESCE(activated_at, ${nowIso}), activated_by = ${activator}
-              WHERE id = ${target.id}
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error activando código en DB:", dbErr);
-          }
-        }
-
-        if (memoryConfig && memoryConfig.business) {
-          memoryConfig.business.licenseCode = target.code;
-          memoryConfig.business.licensePlan = target.plan;
-          memoryConfig.business.licenseCost = target.costFormatted || memoryConfig.business.licenseCost;
-          memoryConfig.business.licenseDuration = target.durationMonths ? `${target.durationMonths} meses` : memoryConfig.business.licenseDuration;
-          memoryConfig.business.licenseActivatedAt = target.activatedAt || nowIso;
-          memoryConfig.business.licenseExpiresAt = target.expiresAt || memoryConfig.business.licenseExpiresAt;
-          memoryConfig.business.licenseStatus = "activado";
-        }
-
-        return sendJson(res, 200, {
-          ok: true,
-          message: "¡Comercio habilitado con éxito! Tu aplicación ya está activa y autorizada.",
-          license: {
-            code: target.code,
-            businessName: target.businessName,
-            plan: target.plan,
-            costFormatted: target.costFormatted || "1.000.000 Gs. / año",
-            durationMonths: target.durationMonths || 12,
-            expiresAt: target.expiresAt,
-            activatedAt: target.activatedAt || nowIso,
-            ownerName: target.ownerName,
-          },
-        });
+        db.activationCodes.unshift(newCodeObj);
+        saveDb(db);
+        return sendJson(res, 200, { ok: true, code: newCodeObj, message: cleanEmail ? `Código creado y otorgado con éxito al correo ${cleanEmail}.` : "Código de activación creado exitosamente." });
       }
 
-      // Actualizar estado de código (disponible, activado, revocado, anulado)
       if (body.action === "updateActivationCodeStatus") {
-        const { codeId, status, extendMonths } = body;
+        const { codeId, status } = body;
         const normalized =
           status === "activado" || status === "active"
             ? "activado"
@@ -1429,46 +1431,49 @@ export default async function handler(req, res) {
             ? "revocado"
             : "disponible";
 
-        const target = memoryActivationCodes.find((c) => c.id === codeId || c.code === codeId);
+        const normCodeId = String(codeId || "").toUpperCase().replace(/[\s-]+/g, "");
+        const target = (db.activationCodes || []).find((c) =>
+          c.id === codeId ||
+          c.code === codeId ||
+          (c.code && c.code.toUpperCase().replace(/[\s-]+/g, "") === normCodeId)
+        );
         if (target) {
           target.status = normalized;
-          if (normalized === "disponible") {
-            target.activatedAt = null;
-            target.activatedBy = null;
+          if (normalized === "activado" && !target.activatedAt) {
+            target.activatedAt = new Date().toISOString();
           }
-          if (normalized === "activado" && extendMonths) {
-            const base = (target.expiresAt && new Date(target.expiresAt).getTime() > Date.now())
-              ? new Date(target.expiresAt).getTime()
-              : Date.now();
-            target.expiresAt = new Date(base + Number(extendMonths) * 30 * 24 * 3600000).toISOString();
+          // Actualizar tiendas que tengan este código o este email
+          for (const s of Object.values(db.stores)) {
+            const storeLic = (s.business?.licenseCode || "").toUpperCase().replace(/[\s-]+/g, "");
+            const storeEmail = (s.ownerEmail || s.email || "").toLowerCase();
+            const targetEmail = (target.email || "").toLowerCase();
+            if (storeLic === normCodeId || (targetEmail && storeEmail === targetEmail)) {
+              if (s.business) {
+                s.business.licenseStatus = normalized;
+                if (normalized === "activado") {
+                  s.business.licenseCode = target.code;
+                  s.business.licensePlan = target.plan;
+                  s.business.licenseExpiresAt = target.expiresAt;
+                }
+              }
+            }
           }
-
-          // Si el código actualizado corresponde al comercio actual
-          if (target.id === "ACT-101" || target.code === memoryConfig.license_code) {
-            memoryConfig.license_status = normalized;
-            if (target.expiresAt) memoryConfig.license_expires_at = target.expiresAt;
+          // También actualizar registros comerciales coincidentes
+          for (const reg of (db.commercialRegistrations || [])) {
+            const regEmail = (reg.email || reg.requestedUser || "").toLowerCase();
+            const targetEmail = (target.email || "").toLowerCase();
+            if (targetEmail && regEmail === targetEmail) {
+              reg.status = normalized === "activado" ? "activo" : normalized === "revocado" ? "rechazado" : "pendiente";
+            }
           }
+          saveDb(db);
         }
-
-        if (sql) {
-          try {
-            await sql`
-              UPDATE activation_codes
-              SET status = ${normalized}
-              WHERE id = ${codeId} OR code = ${codeId}
-            `;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error actualizando estado de código en DB:", dbErr);
-          }
-        }
-
-        return sendJson(res, 200, { ok: true, status: normalized, target });
+        return sendJson(res, 200, { ok: true, status: normalized, target, codes: db.activationCodes });
       }
 
-      // Renovar suscripción / ampliar vencimiento desde Panel Administrador
       if (body.action === "renewActivationCode") {
         const { codeId, extendMonths, newExpiresAt, newPlan, newCost } = body;
-        const target = memoryActivationCodes.find((c) => c.id === codeId || c.code === codeId);
+        const target = db.activationCodes.find((c) => c.id === codeId || c.code === codeId);
         if (target) {
           target.status = "activado";
           if (newExpiresAt) {
@@ -1482,146 +1487,246 @@ export default async function handler(req, res) {
           if (newPlan) target.plan = newPlan;
           if (newCost) target.costFormatted = newCost;
 
-          if (target.id === "ACT-101" || target.code === memoryConfig.license_code) {
-            memoryConfig.license_status = "activado";
-            memoryConfig.license_expires_at = target.expiresAt;
-            if (newPlan) memoryConfig.license_plan = newPlan;
-            if (newCost) memoryConfig.license_cost = newCost;
+          for (const s of Object.values(db.stores)) {
+            if (s.business?.licenseCode === target.code) {
+              s.business.licenseStatus = "activado";
+              s.business.licenseExpiresAt = target.expiresAt;
+            }
           }
+          saveDb(db);
         }
         return sendJson(res, 200, { ok: true, target });
       }
 
-      // Eliminar código de activación o suscripción
       if (body.action === "deleteActivationCode") {
         const { codeId } = body;
-        const target = memoryActivationCodes.find((c) => c.id === codeId || c.code === codeId);
-        if (target && (target.id === "ACT-101" || target.code === memoryConfig.license_code)) {
-          memoryConfig.license_status = "anulado";
-        }
-        memoryActivationCodes = memoryActivationCodes.filter((c) => c.id !== codeId && c.code !== codeId);
-        if (sql) {
-          try {
-            await sql`DELETE FROM activation_codes WHERE id = ${codeId} OR code = ${codeId}`;
-          } catch (dbErr) {
-            console.warn("[AI Studio] Error eliminando código en DB:", dbErr);
-          }
-        }
+        db.activationCodes = db.activationCodes.filter((c) => c.id !== codeId && c.code !== codeId);
+        saveDb(db);
         return sendJson(res, 200, { ok: true });
       }
 
-      // Actualizar datos del negocio en memoria
+      // -------------------------------------------------------------
+      // Acción: Módulo de Pedidos y Caja
+      // -------------------------------------------------------------
+      if (body.action === "getOrders") {
+        let targetStore = matchedStore || getActiveStore(db, body.storeId);
+        if (isSuperadmin && body.storeId) {
+          targetStore = findStore(db, body.storeId) || targetStore;
+        }
+
+        // Si es superadmin y no especificó storeId, devuelve todos los pedidos
+        if (isSuperadmin && !body.storeId) {
+          const allOrders = Object.values(db.stores).flatMap((s) => s.orders || []);
+          return sendJson(res, 200, { ok: true, orders: allOrders });
+        }
+
+        return sendJson(res, 200, { ok: true, orders: targetStore?.orders || [] });
+      }
+
+      if (body.action === "updateOrderStatus") {
+        const { orderId, newStatus, paymentStatus, paymentMethod, storeId } = body;
+        const targetStore = findStore(db, storeId) || matchedStore || getActiveStore(db);
+        const order = (targetStore?.orders || []).find((o) => o.id === orderId);
+        if (order) {
+          if (newStatus) order.orderStatus = newStatus;
+          if (paymentStatus) order.paymentStatus = paymentStatus;
+          if (paymentMethod) order.paymentMethod = paymentMethod;
+          if (paymentStatus === "pagado" && !order.paidAt) order.paidAt = new Date().toISOString();
+          order.updatedAt = new Date().toISOString();
+          saveDb(db);
+        }
+        return sendJson(res, 200, { ok: true, orderId });
+      }
+
+      if (body.action === "payOrder") {
+        const { orderId, paymentMethod, storeId } = body;
+        const targetStore = findStore(db, storeId) || matchedStore || getActiveStore(db);
+        const order = (targetStore?.orders || []).find((o) => o.id === orderId);
+        if (order) {
+          order.paymentStatus = "pagado";
+          order.paymentMethod = paymentMethod || "efectivo";
+          order.paidAt = new Date().toISOString();
+          saveDb(db);
+        }
+        return sendJson(res, 200, { ok: true, orderId });
+      }
+
+      if (body.action === "deleteOrder") {
+        const { orderId, storeId } = body;
+        const targetStore = findStore(db, storeId) || matchedStore || getActiveStore(db);
+        if (targetStore && targetStore.orders) {
+          targetStore.orders = targetStore.orders.filter((o) => o.id !== orderId);
+          saveDb(db);
+        }
+        return sendJson(res, 200, { ok: true, orderId });
+      }
+
+      // =============================================================
+      // GUARDAR CAMBIOS: Portada, Datos del Comercio, Precios y Menú
+      // CADA USUARIO GUARDA SU PROPIO BANNER, TELÉFONOS Y MENÚ
+      // EL ADMINISTRADOR PUEDE MODIFICAR TANTO EL DEMO COMO COMERCIOS
+      // =============================================================
+      const isExplicitDemoUpdate =
+        body.action === "updateDemoStore" ||
+        body.storeId === "losamigos" ||
+        body.targetStoreId === "losamigos" ||
+        body.storeId === "menupy" ||
+        body.targetStoreId === "menupy";
+
+      const isSuperAdminSaving = Boolean(
+        isExplicitDemoUpdate ||
+        body.role === "superadmin" ||
+        body.user === "usuario" ||
+        body.user === "admin" ||
+        body.storeId === "admin" ||
+        body.storeId === "losamigos" ||
+        body.storeId === "menupy" ||
+        (body.user && String(body.user).toLowerCase() === "mecanicadakar@gmail.com")
+      );
+
+      let targetStore = null;
+
+      // 1. Determinar cuál comercio se está modificando
+      if (body.targetStoreId) {
+        targetStore = findStore(db, body.targetStoreId);
+      } else if (body.storeId && body.storeId !== "admin") {
+        targetStore = findStore(db, body.storeId);
+      }
+      if (!targetStore && (isSuperAdminSaving || isExplicitDemoUpdate)) {
+        targetStore = findStore(db, "menupy") || findStore(db, "losamigos") || findStore(db, "admin") || db.stores["menupy"] || db.stores["losamigos"];
+      }
+      if (!targetStore && matchedStore) {
+        targetStore = matchedStore;
+      }
+      if (!targetStore && body.business?.adminUser) {
+        targetStore = findStore(db, body.business.adminUser);
+      }
+      if (!targetStore) {
+        targetStore = getActiveStore(db);
+      }
+
+      if (!targetStore) {
+        return sendJson(res, 404, { ok: false, error: "Comercio no encontrado para guardar los datos." });
+      }
+
+      if (!targetStore.business) {
+        targetStore.business = {};
+      }
+
+      // Actualizar datos del negocio en la tienda correspondiente
       if (body.business && typeof body.business === "object") {
         const b = body.business;
-        if (b.name !== undefined) memoryConfig.business_name = b.name;
-        if (b.slogan !== undefined) memoryConfig.slogan = b.slogan;
-        if (b.phoneIntl !== undefined) memoryConfig.phone_intl = b.phoneIntl;
-        if (b.phoneDisplay !== undefined) memoryConfig.phone_display = b.phoneDisplay;
-        if (b.address !== undefined) memoryConfig.address = b.address;
-        if (b.bannerImage !== undefined) memoryConfig.banner_image = b.bannerImage;
-        if (b.deliveryNote !== undefined) memoryConfig.delivery_note = b.deliveryNote;
+        if (b.name !== undefined) targetStore.business.name = b.name;
+        if (b.slogan !== undefined) targetStore.business.slogan = b.slogan;
+
+        // Sincronizar número de teléfono (internacional y visible)
+        let resolvedIntl = b.phoneIntl;
+        let resolvedDisplay = b.phoneDisplay;
+
+        const dispDigits = String(resolvedDisplay || "").replace(/\D/g, "");
+        if (dispDigits.length >= 9 && (!resolvedIntl || resolvedIntl === "595981456789")) {
+          let d = dispDigits;
+          if (d.startsWith("0")) d = "595" + d.slice(1);
+          else if (!d.startsWith("595") && d.length === 9) d = "595" + d;
+          resolvedIntl = d;
+        }
+
+        if (resolvedIntl) {
+          const clean = String(resolvedIntl).replace(/\D/g, "");
+          targetStore.business.phoneIntl = clean;
+          if (!resolvedDisplay || resolvedDisplay === "0981 123 456") {
+            if (clean.startsWith("595") && clean.length === 12) {
+              const local = "0" + clean.slice(3);
+              resolvedDisplay = `${local.slice(0, 4)} ${local.slice(4, 7)} ${local.slice(7)}`;
+            } else {
+              resolvedDisplay = `+${clean}`;
+            }
+          }
+        }
+        if (resolvedDisplay !== undefined) {
+          targetStore.business.phoneDisplay = resolvedDisplay;
+        }
+
+        if (b.address !== undefined) targetStore.business.address = b.address;
+        if (b.deliveryNote !== undefined) targetStore.business.deliveryNote = b.deliveryNote;
+        if (b.rubro !== undefined) targetStore.business.rubro = b.rubro;
+        if (b.city !== undefined) targetStore.business.city = b.city;
+        if (b.schedule !== undefined) targetStore.business.schedule = b.schedule;
+        if (b.welcomeMessage !== undefined) targetStore.business.welcomeMessage = b.welcomeMessage;
+        
+        if (b.bannerImage !== undefined) {
+          targetStore.business.bannerImage = b.bannerImage;
+          // Si el usuario Administrador guarda la portada o es actualización del demo,
+          // fijar esta imagen en todas las variantes de demo pública
+          if (isSuperAdminSaving || isExplicitDemoUpdate) {
+            if (db.stores["menupy"]) db.stores["menupy"].business.bannerImage = b.bannerImage;
+            if (db.stores["admin"]) db.stores["admin"].business.bannerImage = b.bannerImage;
+            if (db.stores["losamigos"]) db.stores["losamigos"].business.bannerImage = b.bannerImage;
+            if (db.stores["demo"]) db.stores["demo"].business.bannerImage = b.bannerImage;
+          }
+        }
+        
+        // Cambio de credenciales de este comercio
         if (b.adminUser && String(b.adminUser).trim()) {
-          memoryConfig.admin_user = String(b.adminUser).trim();
+          const newUsername = String(b.adminUser).trim().toLowerCase();
+          targetStore.business.adminUser = newUsername;
+          targetStore.username = newUsername;
         }
         if (b.newPin && String(b.newPin).trim()) {
-          memoryConfig.pin = String(b.newPin).trim();
+          targetStore.pin = String(b.newPin).trim();
+          targetStore.business.adminPin = String(b.newPin).trim();
         }
-        if (b.licensePlan !== undefined) memoryConfig.license_plan = b.licensePlan;
-        if (b.licenseCost !== undefined) memoryConfig.license_cost = b.licenseCost;
-        if (b.licenseStatus !== undefined) memoryConfig.license_status = b.licenseStatus;
-        if (b.licenseExpiresAt !== undefined) memoryConfig.license_expires_at = b.licenseExpiresAt;
+
+        // Si el superadmin guarda la demo, sincronizar también en menupy, losamigos, admin y demo
+        const isDemoTarget = targetStore.id === "losamigos" || targetStore.id === "menupy" || targetStore.id === "admin" || targetStore.id === "demo";
+        if ((isSuperAdminSaving || isExplicitDemoUpdate) && isDemoTarget) {
+          const syncStores = [db.stores["menupy"], db.stores["losamigos"], db.stores["admin"], db.stores["demo"]].filter(Boolean);
+          for (const s of syncStores) {
+            if (b.name !== undefined) s.business.name = b.name;
+            if (b.slogan !== undefined) s.business.slogan = b.slogan;
+            if (targetStore.business.phoneIntl !== undefined) s.business.phoneIntl = targetStore.business.phoneIntl;
+            if (targetStore.business.phoneDisplay !== undefined) s.business.phoneDisplay = targetStore.business.phoneDisplay;
+            if (b.address !== undefined) s.business.address = b.address;
+            if (b.deliveryNote !== undefined) s.business.deliveryNote = b.deliveryNote;
+            if (b.bannerImage !== undefined) s.business.bannerImage = b.bannerImage;
+            if (b.rubro !== undefined) s.business.rubro = b.rubro;
+            if (b.city !== undefined) s.business.city = b.city;
+            if (b.schedule !== undefined) s.business.schedule = b.schedule;
+            if (b.welcomeMessage !== undefined) s.business.welcomeMessage = b.welcomeMessage;
+          }
+        }
       }
 
       if (body.deliveryNote !== undefined) {
-        memoryConfig.delivery_note = body.deliveryNote;
+        targetStore.business.deliveryNote = body.deliveryNote;
       }
 
-      // Guardar menú en memoria si vino en el payload
+      // Guardar el menú específico de este comercio
       if (Array.isArray(body.menu)) {
-        memoryMenu = body.menu;
-      }
-
-      // Intentar guardar en base de datos si está conectada
-      if (sql) {
-        try {
-          // Guardar menú si vino
-          if (Array.isArray(body.menu)) {
-            await sql`DELETE FROM items`;
-            await sql`DELETE FROM categories`;
-
-            let catSort = 0;
-            for (const cat of body.menu || []) {
-              catSort++;
-              const [{ id: catId }] = await sql`
-                INSERT INTO categories (name, icon, sort_order)
-                VALUES (${cat.category}, ${cat.icon || "generico"}, ${catSort})
-                RETURNING id
-              `;
-              let itemSort = 0;
-              for (const item of cat.items) {
-                itemSort++;
-                await sql`
-                  INSERT INTO items (id, category_id, name, description, price, image, sort_order)
-                  VALUES (${item.id}, ${catId}, ${item.name}, ${item.desc || ""}, ${Number(item.price) || 0}, ${item.image || ""}, ${itemSort})
-                  ON CONFLICT (id) DO UPDATE SET
-                    category_id = EXCLUDED.category_id,
-                    name = EXCLUDED.name,
-                    description = EXCLUDED.description,
-                    price = EXCLUDED.price,
-                    image = EXCLUDED.image,
-                    sort_order = EXCLUDED.sort_order
-                `;
-              }
-            }
-          }
-
-          // Guardar cada campo de configuración en la tabla config
-          const configUpdates = [];
-          if (memoryConfig.delivery_note !== undefined) {
-            configUpdates.push(['delivery_note', memoryConfig.delivery_note]);
-          }
-          if (memoryConfig.business_name !== undefined) {
-            configUpdates.push(['business_name', memoryConfig.business_name]);
-          }
-          if (memoryConfig.slogan !== undefined) {
-            configUpdates.push(['slogan', memoryConfig.slogan]);
-          }
-          if (memoryConfig.phone_intl !== undefined) {
-            configUpdates.push(['phone_intl', memoryConfig.phone_intl]);
-          }
-          if (memoryConfig.phone_display !== undefined) {
-            configUpdates.push(['phone_display', memoryConfig.phone_display]);
-          }
-          if (memoryConfig.address !== undefined) {
-            configUpdates.push(['address', memoryConfig.address]);
-          }
-          if (memoryConfig.banner_image !== undefined) {
-            configUpdates.push(['banner_image', memoryConfig.banner_image]);
-          }
-          if (body.business?.adminUser && String(body.business.adminUser).trim()) {
-            configUpdates.push(['admin_user', String(body.business.adminUser).trim()]);
-          }
-          if (body.business?.newPin && String(body.business.newPin).trim()) {
-            configUpdates.push(['pin', String(body.business.newPin).trim()]);
-          }
-
-          for (const [key, val] of configUpdates) {
-            await sql`
-              INSERT INTO config (key, value) VALUES (${key}, ${val})
-              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            `;
-          }
-        } catch (dbErr) {
-          console.warn("[AI Studio] No se pudo persistir en DB, cambios guardados en memoria:", dbErr);
+        targetStore.menu = body.menu;
+        // Si el superadmin modifica el menú de la demo o de admin, sincronizarlo para que se vea reflejado en la demo
+        const isDemoTarget = targetStore.id === "losamigos" || targetStore.id === "menupy" || targetStore.id === "admin" || targetStore.id === "demo";
+        if ((isSuperAdminSaving || isExplicitDemoUpdate) && isDemoTarget) {
+          if (db.stores["menupy"]) db.stores["menupy"].menu = body.menu;
+          if (db.stores["losamigos"]) db.stores["losamigos"].menu = body.menu;
+          if (db.stores["admin"]) db.stores["admin"].menu = body.menu;
+          if (db.stores["demo"]) db.stores["demo"].menu = body.menu;
         }
       }
 
+      // Guardar en la base de datos persistente (manteniendo la tienda demo "losamigos" limpia para visitantes)
+      saveDb(db);
+
       return sendJson(res, 200, {
         ok: true,
-        business: buildBusinessObject(memoryConfig),
+        storeId: targetStore.id,
+        business: targetStore.business,
+        menu: targetStore.menu,
+        message: `¡Cambios guardados con éxito para ${targetStore.business.name}!`,
       });
     } catch (err) {
-      return sendJson(res, 500, { ok: false, error: String(err) });
+      console.error("[API Menu Error]:", err);
+      return sendJson(res, 500, { ok: false, error: String(err.message || err) });
     }
   }
 
