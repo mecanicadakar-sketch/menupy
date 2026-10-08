@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with personalized business configuration, banner URLs, contact numbers, and settings indexed by authenticated user ID",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique authenticated user ID" },
+        "email": { "type": "string", "format": "email", "description": "User Google email address" },
+        "displayName": { "type": "string", "description": "User full name" },
+        "photoURL": { "type": "string", "description": "User avatar URL" },
+        "role": { "type": "string", "enum": ["superadmin", "owner", "staff", "customer"], "description": "Platform role" },
+        "businessName": { "type": "string", "description": "Personalized business name" },
+        "slogan": { "type": "string", "description": "Personalized business slogan or subtitle" },
+        "bannerImage": { "type": "string", "description": "Personalized banner image URL" },
+        "phoneIntl": { "type": "string", "description": "Custom international WhatsApp contact number" },
+        "phoneDisplay": { "type": "string", "description": "Custom legible phone number display" },
+        "address": { "type": "string", "description": "Business street address" },
+        "deliveryNote": { "type": "string", "description": "Custom delivery policy or cost note" },
+        "storeId": { "type": "string", "description": "Associated store identifier" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Store configuration and profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Store identifier" },
+        "name": { "type": "string", "description": "Commerce name" },
+        "slogan": { "type": "string", "description": "Slogan" },
+        "phoneIntl": { "type": "string", "description": "WhatsApp phone" },
+        "phoneDisplay": { "type": "string", "description": "Display phone" },
+        "bannerImage": { "type": "string", "description": "Banner image URL" },
+        "ownerEmail": { "type": "string", "description": "Owner Google email" },
+        "ownerUid": { "type": "string", "description": "Owner authenticated UID" },
+        "status": { "type": "string", "enum": ["activo", "pendiente", "rechazado"], "description": "Store status" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["id", "name"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and custom business settings indexed by authenticated user UID"
+    },
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Public and private commerce profiles"
+    }
+  }
+}
