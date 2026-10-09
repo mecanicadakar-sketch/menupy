@@ -176,10 +176,10 @@ function createDefaultDb() {
         business: {
           name: "Menu Py",
           slogan: "Pedí online - Tu Carta Digital y Pedidos por WhatsApp",
-          phoneIntl: "595981456789",
-          phoneDisplay: "0981 123 456",
+          phoneIntl: "595975635770",
+          phoneDisplay: "0975 635 770",
           address: "Encarnación, Paraguay",
-          bannerImage: "/Flyers-MenuPY.png",
+          bannerImage: "/menupy_mockup_qr.jpg",
           deliveryNote: "El costo de envío se coordina según la zona",
           rubro: "Carta Digital & Gastronomía",
           city: "Encarnación",
@@ -479,14 +479,65 @@ export function findStore(db, identifier) {
 
   // 2. Coincidencia por key exacta o id
   if (db.stores[clean]) return db.stores[clean];
+  const cleanNoDash = clean.replace(/[\s-]+/g, "");
   for (const s of Object.values(db.stores)) {
     if (String(s.id).toLowerCase() === clean) return s;
     if (String(s.username || "").toLowerCase() === clean) return s;
     if (String(s.business?.adminUser || "").toLowerCase() === clean) return s;
     if (String(s.ownerEmail || "").toLowerCase() === clean) return s;
+    if (String(s.email || "").toLowerCase() === clean) return s;
+    if (s.ownerEmail && s.ownerEmail.split("@")[0].toLowerCase() === clean) return s;
+    if (s.email && s.email.split("@")[0].toLowerCase() === clean) return s;
+    if (s.username && s.username.includes("@") && s.username.split("@")[0].toLowerCase() === clean) return s;
+    // Coincidencia por nombre de fantasía / slug limpio del local (ej: "La Caserita" -> "lacaserita")
+    if (s.business?.name) {
+      const bizSlug = String(s.business.name).toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (bizSlug && (bizSlug === clean || bizSlug === cleanNoDash)) return s;
+    }
+    // Coincidencia por código de licencia (con o sin guiones)
+    if (s.business?.licenseCode) {
+      const licClean = String(s.business.licenseCode).toLowerCase().replace(/[\s-]+/g, "");
+      if (licClean === cleanNoDash) return s;
+    }
   }
 
-  // 3. Coincidencias para tiendas de demostración / iniciales
+  // 3. Coincidencia con códigos de activación
+  if (db.activationCodes && Array.isArray(db.activationCodes)) {
+    const matchedCode = db.activationCodes.find((ac) => {
+      const acClean = String(ac.code || "").toLowerCase().replace(/[\s-]+/g, "");
+      const acEmail = String(ac.email || "").toLowerCase();
+      const acSlug = acEmail.split("@")[0];
+      return acClean === cleanNoDash || acEmail === clean || acSlug === clean;
+    });
+    if (matchedCode) {
+      const storeKey = matchedCode.email || `store_${matchedCode.code.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+      if (db.stores[storeKey]) return db.stores[storeKey];
+      for (const s of Object.values(db.stores)) {
+        if (s.business?.licenseCode && String(s.business.licenseCode).toLowerCase().replace(/[\s-]+/g, "") === cleanNoDash) {
+          return s;
+        }
+      }
+    }
+  }
+
+  // 4. Coincidencia con registros comerciales
+  if (db.commercialRegistrations && Array.isArray(db.commercialRegistrations)) {
+    const reg = db.commercialRegistrations.find((r) => {
+      const rUser = String(r.requestedUser || "").toLowerCase();
+      const rEmail = String(r.email || "").toLowerCase();
+      const rSlug = rUser.split("@")[0];
+      const rBizSlug = String(r.businessName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      return rUser === clean || rEmail === clean || rSlug === clean || (rBizSlug && (rBizSlug === clean || rBizSlug === cleanNoDash));
+    });
+    if (reg) {
+      const storeKey = (reg.requestedUser || "").toLowerCase();
+      if (db.stores[storeKey]) return db.stores[storeKey];
+      const storeSlug = `store_${storeKey.split("@")[0]}`;
+      if (db.stores[storeSlug]) return db.stores[storeSlug];
+    }
+  }
+
+  // 5. Coincidencias para tiendas de demostración / iniciales
   if (clean === "menupy" || clean === "menu_py" || clean === "menu-py" || clean === "losamigos" || clean === "gerente" || clean === "comercio" || clean === "demo" || clean === "caserita") {
     return db.stores["menupy"] || db.stores["losamigos"] || Object.values(db.stores)[0] || null;
   }
