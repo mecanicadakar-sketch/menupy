@@ -14,7 +14,9 @@ import {
   Maximize2, Minimize2, Smartphone, Flame, ArrowRight, TrendingUp
 } from "lucide-react";
 import InstallAppModal from "./components/InstallAppModal.jsx";
+import RestaurantQrModal from "./components/RestaurantQrModal.jsx";
 import { OrderTrackingModal } from "./components/OrderTrackingModal.jsx";
+import menuPyLogo from "./assets/images/logo-menu-py.png";
 import {
   ORDER_STATUS_CONFIG,
   getNotificationPermission,
@@ -25,6 +27,7 @@ import {
   getCustomerOrders,
   updateCustomerOrderStatus,
   getSyncChannel,
+  deduplicateOrders,
 } from "./services/notificationService.js";
 import {
   auth,
@@ -42,7 +45,15 @@ import {
    ========================================================================= */
 
 const SHEETS_API_URL = "/api/menu"; 
-const SIMULATOR_APP_URL = "https://aistudio.google.com/apps/3eb36468-66f0-48ac-a9ce-b64150d6b8c8?showPreview=true&showAssistant=true&appParams=simulador"; 
+const getSimulatorShareUrl = () => {
+  try {
+    if (typeof window !== "undefined" && window.location) {
+      return `${window.location.origin}${window.location.pathname}?simulador=true`;
+    }
+  } catch {}
+  return "/?simulador=true";
+};
+const SIMULATOR_APP_URL = "/?simulador=true"; 
 
 const BRAND = {
   charcoal: "#2A2018",
@@ -599,7 +610,7 @@ class AdminErrorBoundary extends Component {
     return { hasError: true, error };
   }
   componentDidCatch(error, errorInfo) {
-    console.error("[AI Studio] Admin section error:", error, errorInfo);
+    console.error("[Menu Py] Admin section error:", error, errorInfo);
   }
   handleResetLocalData = () => {
     try {
@@ -901,6 +912,25 @@ export default function App() {
   // Ventana emergente al iniciar para instalar la app (PWA con logo de CyM / Caserita)
   const [showInstallModal, setShowInstallModal] = useState(false);
 
+  // Modal de generación de códigos QR de restaurante y mesas
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrModalStoreId, setQrModalStoreId] = useState(null);
+
+  const openRestaurantQrModal = (targetStoreId = null) => {
+    // Protección de seguridad: solo expuesto a Administrador y/o Gerente autenticado
+    const hasAccess = Boolean(
+      (view === "admin" && adminRole !== "staff") ||
+      (adminSession && adminSession.active && adminSession.role !== "staff")
+    );
+    if (!hasAccess) {
+      addToast("warning", "Acceso Exclusivo", "El generador de códigos QR es exclusivo para la Gerencia y Administración del local.");
+      return;
+    }
+    const activeStore = targetStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || business?.storeId || "losamigos";
+    setQrModalStoreId(activeStore);
+    setShowQrModal(true);
+  };
+
   useEffect(() => {
     // Si la app ya está instalada y corriendo en pantalla completa, no mostrar
     const isStandalone =
@@ -936,7 +966,7 @@ export default function App() {
     }
   }, []);
 
-  // Comprobar parámetros de URL al cargar (?trackOrderId=PED-XXXX)
+  // Comprobar parámetros de URL al cargar (?trackOrderId=PED-XXXX o ?mesa=4 o ?modo=xxx o ?qr=true)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -944,6 +974,21 @@ export default function App() {
       if (trackId) {
         setTrackingOrderId(trackId);
         setTrackingModalOpen(true);
+      }
+      const mesaParam = params.get("mesa");
+      if (mesaParam) {
+        setTableNumber(mesaParam.trim());
+        setMode("mesa");
+        addToast(
+          "order_success",
+          `¡Mesa ${mesaParam.trim()} Seleccionada!`,
+          "Tu mesa ya está asignada automáticamente para hacer tus pedidos."
+        );
+      }
+      // Parámetros de vista
+      const modoParam = params.get("modo");
+      if (modoParam && (modoParam === "mesa" || modoParam === "delivery" || modoParam === "retiro")) {
+        setMode(modoParam);
       }
     } catch (e) {}
   }, []);
@@ -1123,7 +1168,15 @@ export default function App() {
   };
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [mode, setMode] = useState("mesa"); // "mesa" | "delivery" | "retiro"
+  const [mode, setMode] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const m = p.get("modo");
+      if (m === "mesa" || m === "delivery" || m === "retiro") return m;
+      if (p.get("mesa")) return "mesa";
+    } catch {}
+    return "mesa";
+  });
   const [customerName, setCustomerName] = useState(() => {
     try {
       return localStorage.getItem("lacaserita_customer_name") || "";
@@ -1138,7 +1191,13 @@ export default function App() {
       return "";
     }
   });
-  const [tableNumber, setTableNumber] = useState("");
+  const [tableNumber, setTableNumber] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return p.get("mesa") ? p.get("mesa").trim() : "";
+    } catch {}
+    return "";
+  });
   const [tableError, setTableError] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
@@ -1447,6 +1506,12 @@ export default function App() {
     }
   }, [adminRole, adminTab]);
 
+  // Privilegios exclusivos de Administrador y/o Gerente autenticado
+  const isManagerOrAdmin = Boolean(
+    (view === "admin" && adminRole !== "staff") ||
+    (adminSession && adminSession.active && adminSession.role !== "staff")
+  );
+
   const [loginMode, setLoginMode] = useState("owner"); // "owner" | "staff" | "superadmin"
   const [userInput, setUserInput] = useState("");
   const [pinInput, setPinInput] = useState("");
@@ -1470,8 +1535,6 @@ export default function App() {
   const [bindLicenseCode, setBindLicenseCode] = useState("");
   const [bindLicenseError, setBindLicenseError] = useState("");
   const [bindLicenseLoading, setBindLicenseLoading] = useState(false);
-  const [directGoogleEmail, setDirectGoogleEmail] = useState("");
-  const [showDirectGoogleInput, setShowDirectGoogleInput] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthChange(async (user) => {
@@ -1543,87 +1606,6 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Acceso directo con correo Google autorizado (solución si la ventana emergente es bloqueada por el navegador o política de dominio)
-  const handleDirectGoogleAuth = async (customEmail = null) => {
-    const rawEmail = String(customEmail || directGoogleEmail || "").trim().toLowerCase();
-    if (!rawEmail) {
-      setPinError("Por favor ingresá tu correo electrónico de Google.");
-      return;
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(rawEmail)) {
-      setPinError("Por favor ingresá un formato de correo válido (ej: usuario@gmail.com).");
-      return;
-    }
-
-    setGoogleLoading(true);
-    setPinError("");
-    try {
-      const resp = await fetch(SHEETS_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "googleLogin",
-          email: rawEmail,
-          name: rawEmail.split("@")[0],
-        }),
-      });
-      const data = await resp.json();
-      if (!data.ok) {
-        if (data.requiresLicense) {
-          setGoogleLicenseModal({
-            email: rawEmail,
-            displayName: rawEmail.split("@")[0],
-            uid: `direct_${rawEmail.replace(/[^a-z0-9]/gi, "")}`,
-            photoURL: "",
-          });
-          setBindLicenseCode("");
-          setBindLicenseError("");
-          return;
-        }
-        setPinError(data.error || "No se pudo autenticar el correo de Google ingresado.");
-        return;
-      }
-
-      const isSuper = data.role === "superadmin" || rawEmail === "mecanicadakar@gmail.com";
-      const directGUser = {
-        uid: data.uid || `direct_${rawEmail.replace(/[^a-z0-9]/gi, "")}`,
-        email: rawEmail,
-        displayName: data.displayName || rawEmail.split("@")[0],
-        photoURL: data.photoURL || "",
-      };
-
-      setGoogleUser(directGUser);
-      try {
-        sessionStorage.setItem("caserita_google_user", JSON.stringify(directGUser));
-        sessionStorage.setItem("caserita_auth_google_uid", directGUser.uid);
-        sessionStorage.setItem("caserita_auth_user", rawEmail);
-        sessionStorage.setItem("caserita_auth_pin", "google-auth");
-        sessionStorage.setItem("caserita_auth_role", isSuper ? "superadmin" : (data.role || "owner"));
-        if (data.storeId) {
-          sessionStorage.setItem("caserita_auth_store_id", data.storeId);
-        }
-      } catch {}
-
-      setIpLocked(false);
-      setIpRemainingSeconds(0);
-      setAttemptsLeft(5);
-      fetch(`${SHEETS_API_URL}?action=resetIpStatus`).catch(() => {});
-      enterAdmin(isSuper ? "superadmin" : (data.role || "owner"), rawEmail, "google-auth", null, data);
-      addToast(
-        "order_success",
-        `¡Bienvenido!`,
-        isSuper
-          ? `Acceso total maestro concedido a MenuPY (${rawEmail}).`
-          : `Acceso concedido a tu panel de comercio (${rawEmail}).`
-      );
-    } catch (e) {
-      setPinError("Error de conexión al conectar con el servidor para autenticar con Google.");
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     if (loginMode === "staff") {
       setPinError("El personal operativo (mozos y cocina) no utiliza acceso con Google. Ingresá con tu Nombre y PIN de 4 dígitos.");
@@ -1634,18 +1616,21 @@ export default function App() {
     try {
       const res = await signInWithGoogle();
       if (!res.ok) {
-        setShowDirectGoogleInput(true);
-        // En lugar de un error técnico intimidante, mostrar instrucción amigable
-        if (loginMode === "superadmin") {
-          // Intentar acceso directo inmediato para el administrador maestro
-          await handleDirectGoogleAuth("mecanicadakar@gmail.com");
-          return;
-        }
-        setPinError("Por seguridad del navegador, seleccioná tu cuenta o ingresá tu correo de Google registrado abajo para entrar de inmediato.");
+        setPinError(res.error || "No se completó el acceso con Google. Si tu navegador bloqueó la ventana emergente, permitila o ingresá con tu Usuario y PIN de seguridad.");
         setGoogleLoading(false);
         return;
       }
       const gUser = res.user;
+      let idToken = "";
+      try {
+        if (typeof gUser?.getIdToken === "function") {
+          idToken = await gUser.getIdToken();
+        } else if (auth?.currentUser) {
+          idToken = await auth.currentUser.getIdToken();
+        }
+      } catch (tokErr) {
+        console.warn("Aviso al obtener idToken de Google:", tokErr);
+      }
 
       // 1. Acceso Exclusivo para Administrador General Maestro (Superadmin)
       const isMasterGoogle = gUser.email === "mecanicadakar@gmail.com";
@@ -1654,8 +1639,8 @@ export default function App() {
         try {
           sessionStorage.setItem("caserita_google_user", JSON.stringify(gUser));
           sessionStorage.setItem("caserita_auth_google_uid", gUser.uid);
-          sessionStorage.setItem("caserita_auth_user", gUser.email);
-          sessionStorage.setItem("caserita_auth_pin", "google-auth");
+          sessionStorage.setItem("caserita_auth_user", "usuario");
+          sessionStorage.setItem("caserita_auth_pin", "Ricaji270985#");
           sessionStorage.setItem("caserita_auth_role", "superadmin");
           sessionStorage.setItem("caserita_auth_store_id", "losamigos");
         } catch {}
@@ -1671,6 +1656,7 @@ export default function App() {
               name: gUser.displayName,
               uid: gUser.uid,
               photoURL: gUser.photoURL,
+              idToken,
             }),
           });
           masterStoreData = await resp.json();
@@ -1680,11 +1666,11 @@ export default function App() {
         setIpRemainingSeconds(0);
         setAttemptsLeft(5);
         fetch(`${SHEETS_API_URL}?action=resetIpStatus`).catch(() => {});
-        enterAdmin("superadmin", gUser.email, "google-auth", null, masterStoreData);
+        enterAdmin("superadmin", gUser.email, "Ricaji270985#", null, masterStoreData);
         addToast(
           "order_success",
           `¡Bienvenido, Administrador General!`,
-          `Acceso total maestro concedido a MenuPY (${gUser.email}).`
+          `Acceso maestro verificado concedido a MenuPY (${gUser.email}).`
         );
         return;
       }
@@ -1704,6 +1690,7 @@ export default function App() {
             name: gUser.displayName,
             uid: gUser.uid,
             photoURL: gUser.photoURL,
+            idToken,
           }),
         });
         const data = await resp.json();
@@ -1711,7 +1698,7 @@ export default function App() {
           licenseVerified = true;
           storeData = data;
         } else if (data.isPendingApproval) {
-          setPinError(data.error || `Acceso denegado: Tu comercio (${gUser.email}) se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez otorgada la licencia.`);
+          setPinError(data.error || "Acceso denegado: Tu comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez otorgada la licencia.");
           signOut(auth).catch(() => {});
           sessionStorage.removeItem("caserita_google_user");
           sessionStorage.removeItem("caserita_auth_google_uid");
@@ -1836,7 +1823,8 @@ export default function App() {
       setBindLicenseCode("");
       setBindLicenseError("");
     } catch (e) {
-      setPinError("Error de conexión al conectar con Google.");
+      console.error("Error al conectar con Google:", e);
+      setPinError(e?.message ? `Error al conectar con Google: ${e.message}` : "No se pudo conectar con Google. Por favor reintentá o ingresá con Usuario y PIN.");
     } finally {
       setGoogleLoading(false);
     }
@@ -2028,7 +2016,7 @@ export default function App() {
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.filter((o) => o && typeof o === "object");
+          return deduplicateOrders(parsed.filter((o) => o && typeof o === "object"));
         }
       }
       let list = [...DEFAULT_INITIAL_ORDERS];
@@ -2039,9 +2027,9 @@ export default function App() {
           }
         });
       }
-      return list;
+      return deduplicateOrders(list);
     } catch (e) {}
-    return DEFAULT_INITIAL_ORDERS;
+    return deduplicateOrders(DEFAULT_INITIAL_ORDERS);
   });
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersFilterMode, setOrdersFilterMode] = useState("todos"); // "todos" | "mesa" | "delivery" | "retiro"
@@ -2096,11 +2084,12 @@ export default function App() {
   const [whatsAppNotifyOnPay, setWhatsAppNotifyOnPay] = useState(true);
   const [copiedWhatsAppMsg, setCopiedWhatsAppMsg] = useState(false);
 
-  // Sincronizar pedidos en almacenamiento local para asegurar persistencia continua
+  // Sincronizar pedidos en almacenamiento local para asegurar persistencia continua sin duplicados
   useEffect(() => {
     try {
       if (Array.isArray(orders)) {
-        localStorage.setItem("lacaserita_orders", JSON.stringify(orders.filter(Boolean)));
+        const unique = deduplicateOrders(orders);
+        localStorage.setItem("lacaserita_orders", JSON.stringify(unique.filter(Boolean)));
       }
     } catch (e) {}
   }, [orders]);
@@ -2472,7 +2461,27 @@ export default function App() {
     (async () => {
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const urlStore = urlParams.get("comercio") || urlParams.get("store") || urlParams.get("c");
+        let urlStore =
+          urlParams.get("comercio") ||
+          urlParams.get("store") ||
+          urlParams.get("c") ||
+          urlParams.get("local") ||
+          urlParams.get("tienda");
+
+        // Detección si el local viene en la ruta limpia (ej: /lacaserita o /losamigos o /store_xxx) o en el hash (#/lacaserita)
+        if (!urlStore && typeof window !== "undefined") {
+          const pathSegment = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0]?.trim();
+          const reservedPaths = ["api", "assets", "index.html", "favicon.ico", "manifest.json", "sw.js", "robots.txt"];
+          if (pathSegment && !reservedPaths.includes(pathSegment.toLowerCase())) {
+            urlStore = pathSegment;
+          } else if (window.location.hash) {
+            const hashSegment = window.location.hash.replace(/^#\/?/, "").split("?")[0]?.trim();
+            if (hashSegment && !reservedPaths.includes(hashSegment.toLowerCase())) {
+              urlStore = hashSegment;
+            }
+          }
+        }
+
         const activeAuthStore = sessionStorage.getItem("caserita_auth_store_id");
         
         let queryUrl = `${SHEETS_API_URL}?action=getDemoStore`;
@@ -2700,7 +2709,7 @@ export default function App() {
     const q = ordersSearch.trim().toLowerCase();
     const hasSearch = q.length > 0;
 
-    return orders.filter((order) => {
+    const list = orders.filter((order) => {
       if (!order) return false;
 
       // 1. Si hay búsqueda activa:
@@ -2746,6 +2755,7 @@ export default function App() {
       // Por defecto ("todos" o "pendientes"): muestra pedidos activos pendientes de cobro
       return (order.paymentStatus || "").toLowerCase() === "pendiente";
     });
+    return deduplicateOrders(list);
   }, [orders, ordersSearch, ordersFilterMode, ordersStatusFilter]);
 
   // Arqueo y movimiento de caja según período (día, semana, mes, histórico)
@@ -2829,7 +2839,7 @@ export default function App() {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-    return orders.filter((order) => {
+    const list = orders.filter((order) => {
       if (!order) return false;
 
       // 1. Filtro por Estado del Pedido
@@ -2885,6 +2895,7 @@ export default function App() {
 
       return true;
     });
+    return deduplicateOrders(list);
   }, [orders, historyDatePreset, historyCustomDate, historyStatusFilter, historyModeFilter, historySearch]);
 
   // Métricas calculadas para el historial filtrado
@@ -3584,6 +3595,13 @@ export default function App() {
     return () => clearInterval(timer);
   }, [ipLocked, ipRemainingSeconds]);
 
+  // Sincronizar título en la solapa del navegador con Menú Py
+  useEffect(() => {
+    const rawName = (business && business.name && business.name.trim()) ? business.name.trim() : "Menú Py";
+    const displayName = (!rawName || rawName.toLowerCase().includes("caserita") || rawName.toLowerCase().includes("menú py") || rawName.toLowerCase().includes("menupy")) ? "Menú Py" : rawName;
+    document.title = displayName;
+  }, [business?.name]);
+
   // Al ingresar a la pantalla de login o al panel de adquirir app, limpiar siempre usuario y contraseña (evitar pre-escritura)
   useEffect(() => {
     if (view === "adminLogin") {
@@ -3924,7 +3942,7 @@ export default function App() {
 
       if (!result.ok) {
         if (result.isPendingApproval) {
-          setPinError(result.error || `Acceso denegado: El usuario "${cleanUser}" se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez que el Administrador otorgue la licencia.`);
+          setPinError(result.error || `Acceso denegado: El comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.`);
           return;
         }
         if (result.licenseBlocked) {
@@ -3996,7 +4014,7 @@ export default function App() {
         setAttemptsLeft(3);
         enterAdmin("superadmin");
       } else if (isRegisteredPending) {
-        setPinError(`Acceso denegado: El usuario "${cleanUser}" se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez que el Administrador otorgue la licencia.`);
+        setPinError(`Acceso denegado: El comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.`);
       } else if (isStoreOwner || isRegisteredActive || Boolean(activationMatch)) {
         setIpLocked(false);
         setIpRemainingSeconds(0);
@@ -4763,7 +4781,7 @@ export default function App() {
             }
           });
         }
-        setOrders(merged);
+        setOrders(deduplicateOrders(merged));
       }
     } catch (err) {
       console.warn("Error cargando pedidos:", err);
@@ -6121,8 +6139,8 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {cashMovementStats.periodOrders.map((po) => (
-                      <tr key={po.id} className="border-b">
+                    {cashMovementStats.periodOrders.map((po, poIdx) => (
+                      <tr key={po.id ? `cash_po_${po.id}_${poIdx}` : `cash_po_idx_${poIdx}`} className="border-b">
                         <td className="p-2 border font-mono font-bold text-stone-600">{po.id}</td>
                         <td className="p-2 border whitespace-nowrap">
                           {formatTimeSafe(po.paidAt || po.createdAt)}
@@ -6830,11 +6848,11 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-200">
-                    {filteredHistoryOrders.map((o) => {
+                    {filteredHistoryOrders.map((o, oIdx) => {
                       const isPaid = (o.paymentStatus || "").toLowerCase() === "pagado" || (o.paymentStatus || "").toLowerCase() === "cobrado";
                       const isPending = (o.paymentStatus || "").toLowerCase() === "pendiente";
                       return (
-                        <tr key={o.id} className="hover:bg-stone-50">
+                        <tr key={o.id ? `prt_order_${o.id}_${oIdx}` : `prt_idx_${oIdx}`} className="hover:bg-stone-50">
                           <td className="p-2 font-mono font-bold text-stone-900 border-r border-stone-200 whitespace-nowrap">
                             {o.id}
                           </td>
@@ -7750,7 +7768,8 @@ export default function App() {
 
     const handleCopySimLink = () => {
       try {
-        navigator.clipboard.writeText(SIMULATOR_APP_URL);
+        const urlToCopy = getSimulatorShareUrl();
+        navigator.clipboard.writeText(urlToCopy);
         setSimCopiedLink(true);
         setTimeout(() => setSimCopiedLink(false), 2500);
       } catch {}
@@ -7762,29 +7781,46 @@ export default function App() {
           {/* Header */}
           <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 text-stone-900 flex items-center justify-between shrink-0 shadow-md">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-white/40 flex items-center justify-center font-black text-xl shadow-inner border border-white/50">
-                🎮
+              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                <img
+                  src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                  alt="Logo Menú Py"
+                  className="w-full h-full object-contain drop-shadow-md select-none"
+                  onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+                />
               </div>
               <div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-stone-900 text-amber-300">
                     Simulador en Vivo
                   </span>
-                  <span className="text-[11px] font-bold text-amber-950">MenuPY & Caseritas</span>
+                  <span className="text-[11px] font-bold text-amber-950">MenuPy Demo Caseritas</span>
                 </div>
                 <h3 className="font-black text-base sm:text-lg leading-tight text-stone-900 mt-0.5">
                   ¿Cómo funciona y qué beneficios te da tu App?
                 </h3>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowSimulatorModal(false)}
-              className="text-stone-900/80 hover:text-stone-900 hover:bg-white/30 p-1.5 rounded-xl transition cursor-pointer"
-              title="Cerrar simulador"
-            >
-              <X size={20} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <a
+                href={getSimulatorShareUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden sm:inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/30 hover:bg-white/50 text-stone-900 transition"
+                title="Abrir simulador en nueva pestaña"
+              >
+                <ExternalLink size={14} />
+                <span>Nueva pestaña</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowSimulatorModal(false)}
+                className="text-stone-900/80 hover:text-stone-900 hover:bg-white/30 p-1.5 rounded-xl transition cursor-pointer"
+                title="Cerrar simulador"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
           {/* Navigation Tabs */}
@@ -8198,19 +8234,31 @@ export default function App() {
                   </table>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-xl bg-stone-100 text-xs">
-                  <span className="text-stone-600 font-medium">Compartir enlace directo al simulador:</span>
-                  <button
-                    type="button"
-                    onClick={handleCopySimLink}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-200 text-stone-800 border border-stone-300 transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {simCopiedLink ? (
-                      <><Check size={14} className="text-emerald-600" /> ¡Enlace copiado!</>
-                    ) : (
-                      <><Copy size={14} /> Copiar link</>
-                    )}
-                  </button>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-stone-100 text-xs">
+                  <span className="text-stone-600 font-medium">Enlace directo al simulador interactivo MenuPy:</span>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={getSimulatorShareUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-stone-950 transition flex items-center gap-1.5 shadow-sm"
+                      title="Abrir en una ventana o pestaña nueva"
+                    >
+                      <ExternalLink size={13} />
+                      <span>Abrir en ventana nueva</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleCopySimLink}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-200 text-stone-800 border border-stone-300 transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {simCopiedLink ? (
+                        <><Check size={14} className="text-emerald-600" /> ¡Enlace copiado!</>
+                      ) : (
+                        <><Copy size={14} /> Copiar link</>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -8289,7 +8337,7 @@ export default function App() {
                 <span>Cuenta sin Licencia Activa</span>
               </p>
               <p>
-                El correo <b>{googleLicenseModal.email}</b> no se encuentra vinculado a ninguna licencia autorizada de la aplicación.
+                Esta cuenta de Google no se encuentra vinculada a ninguna licencia activa de la aplicación.
               </p>
               <p className="mt-1 text-stone-600">
                 Para acceder como Gerente a este sistema, ingresá el código de licencia otorgado o adquirí una licencia para tu negocio.
@@ -8610,16 +8658,28 @@ export default function App() {
           </div>
 
           <div className="flex justify-center mb-3">
-            <div className={`p-4 rounded-full shadow-inner ${ipLocked ? "bg-red-600 animate-pulse" : ""}`} style={!ipLocked ? { background: BRAND.tomato } : undefined}>
-              {ipLocked ? <ShieldAlert size={28} color={BRAND.cream} /> : <Lock size={26} color={BRAND.cream} />}
+            <div className="relative">
+              <img
+                src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                alt="Logo Menú Py"
+                className="w-20 h-20 object-contain drop-shadow-xl select-none"
+                onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+              />
+              <div className={`absolute -bottom-1 -right-1 p-1.5 rounded-full shadow-md ${ipLocked ? "bg-red-600 animate-pulse" : "bg-stone-900 border border-amber-300"}`}>
+                {ipLocked ? <ShieldAlert size={14} color="#FFFFFF" /> : <Lock size={14} color="#FBBF24" />}
+              </div>
             </div>
           </div>
 
-          <h2 className="slab text-2xl text-center mb-1" style={{ color: BRAND.charcoal }}>
-            {ipLocked ? "Acceso Bloqueado" : "Panel de Control"}
+          <h2 className="slab text-2xl sm:text-3xl text-center mb-1 uppercase tracking-wider font-black text-stone-900">
+            {ipLocked ? "ACCESO BLOQUEADO" : "PANEL DE CONTROL"}
           </h2>
-          <p className="text-center text-xs text-stone-700 mb-4 font-medium">
-            Acceso exclusivo para el único administrador del comercio ({business.adminUser || "Usuario"})
+          <p className="text-center text-xs text-stone-700 mb-4 font-bold uppercase tracking-wide">
+            {loginMode === "owner"
+              ? "ACCESO EXCLUSIVO PARA LA GERENCIA DEL COMERCIO"
+              : loginMode === "staff"
+              ? "ACCESO OPERATIVO PARA EL PERSONAL DE SALÓN Y COCINA"
+              : "ACCESO MAESTRO PARA LA ADMINISTRACIÓN CENTRAL"}
           </p>
 
           {/* BANNER DE BLOQUEO DE IP POR 3 INTENTOS FALLIDOS */}
@@ -8667,10 +8727,10 @@ export default function App() {
           {/* Opción Nivel 1: Acceso a Clientes */}
           <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3 shadow-sm">
             <div className="min-w-0 flex-1">
-              <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+              <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5 uppercase tracking-wide">
                 <ShoppingBag size={15} className="text-emerald-700 flex-shrink-0" />
-                <span>1. Acceso a Clientes</span>
-                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900">Público</span>
+                <span>1. ACCESO A CLIENTES</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900 uppercase">PÚBLICO</span>
               </span>
               <span className="text-[11px] text-emerald-800 block leading-tight mt-0.5">
                 Limitado a realizar pedidos y ver el estado de su comanda en tiempo real.
@@ -8679,71 +8739,94 @@ export default function App() {
             <button
               type="button"
               onClick={() => setView("menu")}
-              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex-shrink-0 shadow active:scale-95"
+              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex-shrink-0 shadow active:scale-95 uppercase tracking-wider"
             >
-              Pedir en Carta
+              PEDIR EN CARTA
             </button>
           </div>
 
-          {/* Selector de Perfil de Acceso: Gerente, Personal, Administrador */}
-          <div className="mb-4 bg-stone-200/80 p-1 rounded-xl flex gap-1">
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("owner");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "owner"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <Store size={14} className={loginMode === "owner" ? "text-[#C1392B]" : ""} />
-              <span>👔 2. Gerente</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("staff");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "staff"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <ChefHat size={14} className={loginMode === "staff" ? "text-blue-600" : ""} />
-              <span>👨‍🍳 Personal</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("superadmin");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "superadmin"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <ShieldCheck size={14} className={loginMode === "superadmin" ? "text-amber-600" : ""} />
-              <span>👑 3. Admin</span>
-            </button>
+          {/* Selector Resaltado de Solapas: GERENTE, PERSONAL, ADMIN */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-[11px] font-black uppercase tracking-wider text-stone-800">
+                SOLAPAS DE ACCESO:
+              </span>
+              <span
+                className="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs"
+                style={{
+                  background: loginMode === "owner" ? "#FEE2E2" : loginMode === "staff" ? "#DBEAFE" : "#FEF3C7",
+                  color: loginMode === "owner" ? "#991B1B" : loginMode === "staff" ? "#1E40AF" : "#92400E",
+                  border: `1.5px solid ${loginMode === "owner" ? "#FCA5A5" : loginMode === "staff" ? "#93C5FD" : "#FDE68A"}`,
+                }}
+              >
+                {loginMode === "owner" ? "👔 SOLAPA GERENTE" : loginMode === "staff" ? "👨‍🍳 SOLAPA PERSONAL" : "👑 SOLAPA ADMIN"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-stone-200/90 border-2 border-stone-300 shadow-inner">
+              {/* Solapa 1: GERENTE */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("owner");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "owner"
+                    ? "bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white shadow-lg ring-2 ring-red-400 scale-[1.02]"
+                    : "bg-white hover:bg-red-50 text-stone-700 hover:text-red-700 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <Store size={16} className={loginMode === "owner" ? "text-amber-200" : "text-red-600"} />
+                <span>GERENTE</span>
+              </button>
+
+              {/* Solapa 2: PERSONAL */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("staff");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "staff"
+                    ? "bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white shadow-lg ring-2 ring-blue-400 scale-[1.02]"
+                    : "bg-white hover:bg-blue-50 text-stone-700 hover:text-blue-700 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <ChefHat size={16} className={loginMode === "staff" ? "text-blue-200" : "text-blue-600"} />
+                <span>PERSONAL</span>
+              </button>
+
+              {/* Solapa 3: ADMIN */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("superadmin");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "superadmin"
+                    ? "bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-stone-950 shadow-lg ring-2 ring-amber-300 scale-[1.02]"
+                    : "bg-white hover:bg-amber-50 text-stone-700 hover:text-amber-800 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <ShieldCheck size={16} className={loginMode === "superadmin" ? "text-stone-950" : "text-amber-600"} />
+                <span>ADMIN</span>
+              </button>
+            </div>
           </div>
 
           {/* Opción de Acceso con Cuenta de Google: SOLO para Gerente con Licencia o Administrador Maestro */}
@@ -8765,8 +8848,8 @@ export default function App() {
               </div>
               <p className="text-[11px] text-stone-600 mb-3 leading-snug">
                 {loginMode === "superadmin"
-                  ? "Acceso directo seguro para el administrador general autorizado de MenuPY."
-                  : "Ingresá con tu cuenta autorizada vinculada a la licencia de tu comercio."}
+                  ? "Acceso seguro para la administración de MenuPY."
+                  : "Acceso exclusivo para la Gerencia de comercios con licencia habilitada."}
               </p>
 
               {/* Botón Principal Continuar con Google */}
@@ -8790,99 +8873,6 @@ export default function App() {
                   </>
                 )}
               </button>
-
-              {/* Botón de acceso directo para el Administrador Maestro (mecanicadakar@gmail.com) */}
-              {loginMode === "superadmin" && (
-                <button
-                  type="button"
-                  onClick={() => handleDirectGoogleAuth("mecanicadakar@gmail.com")}
-                  disabled={googleLoading}
-                  className="w-full mt-2.5 py-2.5 px-4 rounded-xl font-black text-xs bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-stone-950 shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition active:scale-[0.98] border border-amber-300"
-                >
-                  <ShieldCheck size={16} className="text-stone-900" />
-                  <span>👑 Acceso Directo Maestro: mecanicadakar@gmail.com</span>
-                </button>
-              )}
-
-              {/* Accesos Rápidos de Google para Comercios Autorizados */}
-              {loginMode === "owner" && (
-                <div className="mt-3 pt-2.5 border-t border-stone-200">
-                  <p className="text-[10px] font-bold text-stone-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Sparkles size={11} className="text-amber-500" /> Comercios Autorizados (Acceso Rápido):
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    <button
-                      type="button"
-                      onClick={() => handleDirectGoogleAuth("mecanicadakar@gmail.com")}
-                      disabled={googleLoading}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-950 border border-amber-300 hover:bg-amber-200 transition"
-                      title="Acceso Maestro Administrador"
-                    >
-                      👑 mecanicadakar@gmail.com
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDirectGoogleAuth("mirthamabeltrinidad@gmail.com")}
-                      disabled={googleLoading}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-100 text-emerald-950 border border-emerald-300 hover:bg-emerald-200 transition"
-                      title="La Caserita (Rotisería y Minutas)"
-                    >
-                      🏪 mirthamabeltrinidad@gmail.com
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDirectGoogleAuth("menupy@gmail.com")}
-                      disabled={googleLoading}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-stone-100 text-stone-800 border border-stone-300 hover:bg-stone-200 transition"
-                      title="Menu Py"
-                    >
-                      🏪 menupy@gmail.com
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Opción de ingreso manual con correo Google directo */}
-              <div className="mt-2.5 pt-2.5 border-t border-stone-200">
-                {!showDirectGoogleInput ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowDirectGoogleInput(true)}
-                    className="text-[11px] font-bold text-amber-900 hover:underline flex items-center justify-center w-full gap-1"
-                  >
-                    <span>¿Ventana emergente bloqueada? Ingresar correo Google directo</span>
-                  </button>
-                ) : (
-                  <div className="space-y-1.5 animate-fadeIn">
-                    <label className="text-[11px] font-bold text-stone-700 block">
-                      Ingresá tu correo Google autorizado:
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="email"
-                        value={directGoogleEmail}
-                        onChange={(e) => setDirectGoogleEmail(e.target.value)}
-                        placeholder="ejemplo@gmail.com"
-                        className="flex-1 p-2 rounded-xl border text-xs font-mono bg-stone-50 border-stone-300"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleDirectGoogleAuth();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleDirectGoogleAuth()}
-                        disabled={googleLoading}
-                        className="px-3.5 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-600 text-stone-900 shadow-sm shrink-0"
-                      >
-                        Ingresar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           ) : (
             <div className="mb-4 p-3.5 rounded-2xl bg-blue-50 border-2 border-blue-200 shadow-sm text-xs leading-relaxed text-blue-950">
@@ -8908,8 +8898,8 @@ export default function App() {
             {loginMode === "staff" ? (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
-                    Usuario
+                  <label className="block text-xs font-black uppercase tracking-wider mb-1 ml-1 text-stone-800">
+                    USUARIO
                   </label>
                   <input
                     key={`staff_usr_${loginFormKey}`}
@@ -8939,8 +8929,8 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
-                    Ingresar PIN
+                  <label className="block text-xs font-black uppercase tracking-wider mb-1 ml-1 text-stone-800">
+                    INGRESAR PIN OPERATIVO
                   </label>
                   <div className="relative">
                     <input
@@ -8984,8 +8974,8 @@ export default function App() {
             ) : (
               <>
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
-                    {loginMode === "owner" ? "Usuario de Gerencia o Comercio" : "Usuario Administrador Maestro"}
+                  <label className="block text-xs font-black uppercase tracking-wider mb-1 ml-1 text-stone-800">
+                    {loginMode === "owner" ? "USUARIO DE GERENCIA O COMERCIO" : "USUARIO ADMINISTRADOR MAESTRO"}
                   </label>
                   <input
                     key={`admin_usr_${loginFormKey}`}
@@ -9015,10 +9005,10 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
+                  <label className="block text-xs font-black uppercase tracking-wider mb-1 ml-1 text-stone-800">
                     {loginMode === "owner"
-                      ? "Clave / PIN del Comercio o Gerente"
-                      : "PIN Maestro de Seguridad"}
+                      ? "CLAVE / PIN DEL COMERCIO O GERENTE"
+                      : "PIN MAESTRO DE SEGURIDAD"}
                   </label>
                   <div className="relative">
                     <input
@@ -9124,24 +9114,24 @@ export default function App() {
           <button
             onClick={checkPinAndEnter}
             disabled={verifying || (ipLocked && loginMode !== "superadmin")}
-            className="w-full mt-5 rounded-xl p-3.5 font-bold flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition disabled:opacity-60 text-base"
+            className="w-full mt-5 rounded-xl p-3.5 font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition disabled:opacity-60 text-sm sm:text-base cursor-pointer"
             style={{
-              background: loginMode === "staff" ? "#2563EB" : BRAND.tomato,
+              background: loginMode === "staff" ? "#2563EB" : loginMode === "superadmin" ? "#D97706" : BRAND.tomato,
               color: BRAND.cream,
             }}
           >
             {verifying ? (
-              <><LoaderCircle className="animate-spin" size={18} /> Verificando acceso...</>
+              <><LoaderCircle className="animate-spin" size={18} /> VERIFICANDO ACCESO...</>
             ) : (ipLocked && loginMode !== "superadmin") ? (
-              `Bloqueado (${formatLockTime(ipRemainingSeconds)})`
+              `BLOQUEADO (${formatLockTime(ipRemainingSeconds)})`
             ) : (ipLocked && loginMode === "superadmin") ? (
-              "Desbloquear IP como Administrador"
+              "DESBLOQUEAR IP COMO ADMINISTRADOR"
             ) : loginMode === "staff" ? (
-              userInput.trim() ? `Ingresar como ${userInput.trim()}` : "Ingresar como Personal"
+              userInput.trim() ? `INGRESAR COMO ${userInput.trim().toUpperCase()}` : "INGRESAR COMO PERSONAL"
             ) : loginMode === "owner" ? (
-              "Ingresar al Panel de Gerente"
+              "INGRESAR AL PANEL DE GERENTE"
             ) : (
-              "Ingresar como Administrador Único"
+              "INGRESAR COMO ADMINISTRADOR ÚNICO"
             )}
           </button>
 
@@ -10106,6 +10096,29 @@ export default function App() {
                 </button>
               )}
 
+              {/* PESTAÑA: Códigos QR de Mesas y Carta */}
+              {adminRole !== "staff" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminTab("qr");
+                    openRestaurantQrModal();
+                  }}
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm font-bold transition border-b-4 cursor-pointer ${
+                    adminTab === "qr"
+                      ? "border-[#C1392B] text-[#FBF2DD] bg-stone-900/50"
+                      : "border-transparent text-amber-300 hover:text-amber-100 hover:bg-stone-900/50"
+                  }`}
+                  title="Generador de Códigos QR para mesas y mostrador"
+                >
+                  <QrCode size={17} className="text-amber-400" />
+                  <span>Códigos QR Mesas</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-stone-950">
+                    Generar
+                  </span>
+                </button>
+              )}
+
               {/* PESTAÑA: Permisos al Personal (Mozos / Cocina) - Controlada por el Gerente */}
               {adminRole !== "staff" && (
                 <button
@@ -10654,7 +10667,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {filteredActiveOrders.map((order) => {
+                    {filteredActiveOrders.map((order, orderIdx) => {
                       const isMesa = order.mode === "mesa";
                       const isDelivery = order.mode === "delivery";
                       const isRetiro = order.mode === "retiro";
@@ -10686,7 +10699,7 @@ export default function App() {
 
                       return (
                         <div
-                          key={order.id}
+                          key={order.id ? `act_ord_${order.id}_${orderIdx}` : `act_ord_idx_${orderIdx}`}
                           className={`rounded-2xl bg-white border-2 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between ${
                             isJuanOrder ? "ring-2 ring-amber-400 border-amber-500" : ""
                           }`}
@@ -11080,12 +11093,12 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
-                        {cashMovementStats.periodOrders.map((po) => {
+                        {cashMovementStats.periodOrders.map((po, poIdx) => {
                           const isMesa = po.mode === "mesa";
                           const isDelivery = po.mode === "delivery";
 
                           return (
-                            <tr key={po.id} className="hover:bg-stone-50/80 transition">
+                            <tr key={po.id ? `cash_rep_${po.id}_${poIdx}` : `cash_rep_idx_${poIdx}`} className="hover:bg-stone-50/80 transition">
                               <td className="p-3 font-mono font-bold text-stone-600">{po.id}</td>
                               <td className="p-3 whitespace-nowrap text-stone-500">
                                 {formatDateSafe(po.paidAt || po.createdAt)} {formatTimeSafe(po.paidAt || po.createdAt)}
@@ -11626,7 +11639,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-stone-100 bg-white">
-                          {filteredHistoryOrders.map((order) => {
+                          {filteredHistoryOrders.map((order, histIdx) => {
                             const isPaid = (order.paymentStatus || "").toLowerCase() === "pagado" || (order.paymentStatus || "").toLowerCase() === "cobrado";
                             const isPending = (order.paymentStatus || "").toLowerCase() === "pendiente";
                             const isCancelled = (order.paymentStatus || "").toLowerCase() === "cancelado" || (order.paymentStatus || "").toLowerCase() === "anulado";
@@ -11636,7 +11649,7 @@ export default function App() {
 
                             return (
                               <tr
-                                key={order.id}
+                                key={order.id ? `hist_ord_${order.id}_${histIdx}` : `hist_ord_idx_${histIdx}`}
                                 className={`transition ${
                                   isChecked
                                     ? "bg-red-50/70 hover:bg-red-100/60 ring-1 ring-inset ring-red-200"
@@ -11832,6 +11845,39 @@ export default function App() {
           {adminTab === "business" && (
             <div className="space-y-6">
 
+              {/* TARJETA DESTACADA: GENERADOR DE CÓDIGOS QR DE MESAS Y CARTA */}
+              <div className="rounded-2xl p-5 border-2 shadow-sm bg-gradient-to-r from-stone-900 via-amber-950 to-stone-900 text-white border-amber-400/40">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center shrink-0 shadow-lg">
+                      <QrCode size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-white flex items-center gap-2">
+                        <span>Códigos QR de Mesas y Carta Digital</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-stone-950">
+                          Listo para Imprimir
+                        </span>
+                      </h3>
+                      <p className="text-xs text-amber-100/90 mt-0.5">
+                        Generá códigos QR individuales para cada mesa de tu local, descarga en HD o imprimí tus porta-menús en 1 clic.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminTab("qr");
+                      openRestaurantQrModal();
+                    }}
+                    className="px-4 py-2.5 rounded-xl font-bold text-xs bg-amber-400 hover:bg-amber-500 text-stone-950 flex items-center justify-center gap-2 shadow-md transition shrink-0 cursor-pointer"
+                  >
+                    <QrCode size={16} />
+                    <span>Abrir Generador de QR</span>
+                  </button>
+                </div>
+              </div>
+
               {/* BANNER PRINCIPAL DE CONFIGURACIÓN DEL DEMO (SOLO ADMINISTRADOR) */}
               {adminRole === "superadmin" && (
                 <div className="rounded-2xl p-5 md:p-6 border-2 shadow-sm bg-gradient-to-r from-amber-500/10 via-amber-400/5 to-white border-amber-300">
@@ -11959,7 +12005,14 @@ export default function App() {
                                 : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50"
                             }`}
                           >
-                            🏪 {s.name || s.id}
+                            🏪 {(() => {
+                              let n = String(s.name || "").trim();
+                              if (n && !n.includes("@") && !n.includes("_gmail_com")) return n;
+                              if (n.includes("@")) return n.split("@")[0].replace(/[._-]/g, " ").trim();
+                              if (n.includes("_gmail_com")) return n.replace(/_gmail_com/gi, "").replace(/[._-]/g, " ").trim();
+                              const raw = String(s.id || "").split("@")[0].replace(/_gmail_com/gi, "").replace(/store_/gi, "").replace(/[._-]/g, " ").trim();
+                              return raw || "Comercio";
+                            })()}
                           </button>
                         ))}
                       </div>
@@ -13114,6 +13167,40 @@ export default function App() {
               >
                 <Plus size={18} /> Crear nueva categoría de comida personalizada
               </button>
+            </div>
+          )}
+
+          {/* =================================================================
+              PESTAÑA: GENERADOR DE CÓDIGOS QR DE MESAS Y CARTA DIGITAL
+              ================================================================= */}
+          {adminTab === "qr" && (
+            <div className="space-y-6">
+              <RestaurantQrModal
+                inline={true}
+                restaurant={business}
+                currentStoreId={qrModalStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || "losamigos"}
+                allStores={
+                  Array.isArray(availableStores) && availableStores.length > 0
+                    ? availableStores
+                    : Array.isArray(registeredClients) && registeredClients.length > 0
+                    ? registeredClients.map((c) => ({
+                        id: (c?.requestedUser && c.requestedUser.includes("@"))
+                          ? c.requestedUser.split("@")[0].toLowerCase().replace(/[^a-z0-9_-]/g, "")
+                          : (c?.id || "comercio"),
+                        name:
+                          c?.businessName ||
+                          c?.name ||
+                          (c?.requestedUser
+                            ? String(c.requestedUser).split("@")[0].replace(/[._-]/g, " ")
+                            : "Comercio"),
+                        phoneIntl: String(c?.whatsapp || ""),
+                        phoneDisplay: String(c?.whatsapp || ""),
+                      }))
+                    : [{ id: currentStoreId || "losamigos", name: business?.name || "Menu Py", phoneIntl: String(business?.phoneIntl || ""), phoneDisplay: String(business?.phoneDisplay || "") }]
+                }
+                isSuperAdmin={adminRole === "superadmin"}
+                onOpenModal={() => openRestaurantQrModal()}
+              />
             </div>
           )}
 
@@ -14963,18 +15050,32 @@ export default function App() {
       )}
 
       {/* Barra Superior Sticky con Nombre, Carrito y Acceso a Admin */}
-      <div style={{ background: BRAND.charcoalDark }} className={`sticky ${adminSession && adminSession.active ? "top-10" : "top-0"} z-20 shadow-lg border-b border-stone-800/80 transition-all`}>
-        <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="slab text-lg sm:text-xl md:text-2xl text-white tracking-wide leading-none truncate">
-              {business.name}
-            </h1>
-            <p className="hand text-base sm:text-lg md:text-xl leading-none mt-0.5" style={{ color: BRAND.mustard }}>
-              {business.slogan || "Pedí online"}
-            </p>
+      <div style={{ background: BRAND.charcoalDark }} className={`sticky ${adminSession && adminSession.active ? "top-10" : "top-0"} z-20 shadow-xl border-b border-stone-800/80 transition-all`}>
+        <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-2.5 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3.5">
+          <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
+            <img
+              src={menuPyLogo || "/app-logo.png?v=menupy6"}
+              alt="Logo Menú Py"
+              className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 object-contain drop-shadow-xl flex-shrink-0 select-none transition-transform duration-200 hover:scale-105"
+              onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+            />
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <h1 className="slab text-lg sm:text-2xl md:text-3xl lg:text-4xl text-white tracking-wide leading-tight whitespace-nowrap drop-shadow-sm">
+                {business.name}
+              </h1>
+              {/* Eslogan optimizado: limpio y en una sola línea en móvil, completo en tablet y PC */}
+              <p className="hand text-xs sm:text-sm md:text-lg lg:text-xl leading-none mt-0.5" style={{ color: BRAND.mustard }}>
+                <span className="sm:hidden block truncate">
+                  {business.slogan ? (business.slogan.includes("-") ? business.slogan.split("-")[0].trim() : business.slogan) : "Pedí online"}
+                </span>
+                <span className="hidden sm:inline">
+                  {business.slogan || "Pedí online - Tu Carta Digital y Pedidos por WhatsApp"}
+                </span>
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-3 flex-shrink-0">
             {/* Mensaje de ayuda para seleccionar productos (visible en PC) */}
             <div className="hidden lg:flex items-center gap-1.5 text-right leading-tight">
               <span className="hand text-lg xl:text-xl" style={{ color: "#FFD600", maxWidth: 190 }}>
@@ -14989,7 +15090,7 @@ export default function App() {
                 setTrackingOrderId(customerOrders[0]?.id || null);
                 setTrackingModalOpen(true);
               }}
-              className="relative py-2 sm:py-2.5 px-3 sm:px-3.5 rounded-full flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition bg-stone-800 text-stone-200 border border-stone-700"
+              className="relative p-2 sm:py-2.5 sm:px-3.5 rounded-full flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition bg-stone-800 text-stone-200 border border-stone-700"
               title="Seguimiento en vivo de tus pedidos y notificaciones push"
             >
               <BellRing
@@ -15017,11 +15118,11 @@ export default function App() {
             {/* Botón del Carrito */}
             <button
               onClick={() => setCartOpen(true)}
-              className="relative py-2 sm:py-2.5 px-3.5 sm:px-4 rounded-full flex items-center gap-2 shadow-md hover:brightness-105 active:scale-95 transition"
+              className="relative p-2 sm:py-2.5 sm:px-4 rounded-full flex items-center gap-1.5 sm:gap-2 shadow-md hover:brightness-105 active:scale-95 transition"
               style={{ background: BRAND.tomato }}
               title="Ver tu pedido"
             >
-              <ShoppingCart size={19} color={BRAND.cream} />
+              <ShoppingCart size={18} color={BRAND.cream} />
               <span className="font-bold text-xs sm:text-sm hidden sm:inline" style={{ color: BRAND.cream }}>
                 {totalPrice > 0 ? formatGs(totalPrice) : "Carrito"}
               </span>
@@ -15032,10 +15133,26 @@ export default function App() {
               )}
             </button>
 
+            {/* Botón Generador de Código QR del Menú / Mesas (Exclusivo Administrador y/o Gerente) */}
+            {isManagerOrAdmin && (
+              <button
+                onClick={() => openRestaurantQrModal()}
+                className="inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-stone-950 cursor-pointer"
+                style={{
+                  background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 60%, #F59E0B 100%)",
+                  boxShadow: "0 2px 8px rgba(245, 158, 11, 0.35)",
+                }}
+                title="Generar o imprimir código QR único de la carta o mesas de este restaurante (Exclusivo Gerencia)"
+              >
+                <QrCode size={15} />
+                <span className="hidden sm:inline">Código QR</span>
+              </button>
+            )}
+
             {/* Botón Instalar App (Acceso directo con logo oficial) */}
             <button
               onClick={() => setShowInstallModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-white"
+              className="inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-white"
               style={{
                 background: "linear-gradient(135deg, #0050E6 0%, #0072FF 60%, #00B4D8 100%)",
                 boxShadow: "0 2px 8px rgba(0, 114, 255, 0.3)"
@@ -15365,6 +15482,17 @@ export default function App() {
                     {n}
                   </button>
                 ))}
+                {isManagerOrAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => openRestaurantQrModal()}
+                    className="px-2 py-0.5 text-xs rounded-md font-bold bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition flex items-center gap-1 shrink-0 ml-1"
+                    title="Generar código QR para imprimir en esta mesa (Exclusivo Gerencia)"
+                  >
+                    <QrCode size={11} />
+                    <span>QR Mesa</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -16301,24 +16429,36 @@ export default function App() {
           <p className="font-bold text-white text-sm tracking-wide">{business.name}</p>
           <p className="text-slate-300">{business.address}</p>
           <p className="text-sky-200/80">Pedidos vía WhatsApp al {business.phoneDisplay}</p>
-          <div className="pt-2 pb-1">
+          <div className="pt-2 pb-1 flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => setShowInstallModal(true)}
-              className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-lg hover:brightness-110 active:scale-95 transition inline-flex items-center gap-2 border border-sky-400/40"
+              className="px-4 py-2 rounded-full text-xs font-bold text-stone-950 shadow-lg hover:brightness-110 active:scale-95 transition inline-flex items-center gap-2 border border-amber-300"
               style={{
-                background: "linear-gradient(135deg, #0050E6 0%, #0072FF 50%, #00A2FF 100%)",
-                boxShadow: "0 4px 15px rgba(0, 114, 255, 0.35)"
+                background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 50%, #F59E0B 100%)",
+                boxShadow: "0 4px 15px rgba(245, 158, 11, 0.4)"
               }}
             >
               <img
-                src="/app-logo.png"
-                alt=""
-                className="w-4 h-4 rounded-full bg-white object-contain"
-                onError={(e) => { e.currentTarget.src = "/app-logo.svg"; }}
+                src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                alt="Menú Py"
+                className="w-5 h-5 object-contain select-none"
+                onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
               />
-              <span>Instalar App en tu celular o PC (Acceso directo)</span>
+              <span>Instalar Menú Py (Acceso directo)</span>
             </button>
+
+            {isManagerOrAdmin && (
+              <button
+                type="button"
+                onClick={() => openRestaurantQrModal()}
+                className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-lg hover:bg-stone-800 active:scale-95 transition inline-flex items-center gap-2 border border-stone-700 bg-stone-900/90"
+                title="Generar o descargar códigos QR para tus mesas (Exclusivo Gerencia)"
+              >
+                <QrCode size={15} className="text-amber-400" />
+                <span>Ver Códigos QR de Mesas</span>
+              </button>
+            )}
           </div>
 
           {/* Enlace al panel de precios para adquirir la app */}
@@ -16424,7 +16564,7 @@ export default function App() {
                   title={adminSession && adminSession.active ? "Volver a Panel de Control" : "Acceso Administración"}
                 >
                   <Lock size={10} />
-                  <span>{adminSession && adminSession.active ? "Volver a Panel de Control" : "Acceso Gerencia"}</span>
+                  <span>{adminSession && adminSession.active ? "VOLVER A PANEL DE CONTROL" : "ACCESO GERENCIA"}</span>
                 </button>
               </div>
             </div>
@@ -16522,6 +16662,37 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal de Generador de Códigos QR de Restaurante y Mesas (Exclusivo Administrador / Gerente) */}
+      {showQrModal && isManagerOrAdmin && (
+        <RestaurantQrModal
+          key="floating_qr_modal"
+          isOpen={true}
+          onClose={() => setShowQrModal(false)}
+          restaurant={business}
+          currentStoreId={qrModalStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || "losamigos"}
+          allStores={
+            Array.isArray(availableStores) && availableStores.length > 0
+              ? availableStores
+              : Array.isArray(registeredClients) && registeredClients.length > 0
+              ? registeredClients.map((c) => ({
+                  id: (c?.requestedUser && c.requestedUser.includes("@"))
+                    ? c.requestedUser.split("@")[0].toLowerCase().replace(/[^a-z0-9_-]/g, "")
+                    : (c?.id || "comercio"),
+                  name:
+                    c?.businessName ||
+                    c?.name ||
+                    (c?.requestedUser
+                      ? String(c.requestedUser).split("@")[0].replace(/[._-]/g, " ")
+                      : "Comercio"),
+                  phoneIntl: String(c?.whatsapp || ""),
+                  phoneDisplay: String(c?.whatsapp || ""),
+                }))
+              : [{ id: currentStoreId || "losamigos", name: business?.name || "Menu Py", phoneIntl: String(business?.phoneIntl || ""), phoneDisplay: String(business?.phoneDisplay || "") }]
+          }
+          isSuperAdmin={adminRole === "superadmin"}
+        />
       )}
 
       {/* Modal de Instalación PWA (con Logo Oficial) */}

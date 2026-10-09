@@ -14,7 +14,7 @@ class RootErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error("[AI Studio] Uncaught application error:", error, errorInfo);
+    console.error("[Menu Py] Application error:", error, errorInfo);
     this.setState({ errorInfo });
   }
 
