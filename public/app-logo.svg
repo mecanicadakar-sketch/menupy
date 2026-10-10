@@ -1,106 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
   <defs>
-    <radialGradient id="bgGlow" cx="50%" cy="40%" r="65%">
-      <stop offset="0%" stop-color="#3A1E14" />
-      <stop offset="70%" stop-color="#23120B" />
-      <stop offset="100%" stop-color="#190B06" />
-    </radialGradient>
-    <linearGradient id="goldBorder" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FFC83B" />
-      <stop offset="50%" stop-color="#F5A60F" />
-      <stop offset="100%" stop-color="#E58A00" />
+    <!-- Gradiente azul vibrante para aros y órbita -->
+    <linearGradient id="cymOrbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0050E6"/>
+      <stop offset="50%" stop-color="#0072FF"/>
+      <stop offset="100%" stop-color="#00B4D8"/>
     </linearGradient>
-    <linearGradient id="goldCloche" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FFD152" />
-      <stop offset="60%" stop-color="#F5A60F" />
-      <stop offset="100%" stop-color="#D97706" />
+
+    <!-- Gradiente para letra y -->
+    <linearGradient id="cymYGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0066FF"/>
+      <stop offset="100%" stop-color="#00A2FF"/>
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.45" />
-    </filter>
   </defs>
 
-  <!-- Fondo de placa con bordes redondeados (Squircle) y marco dorado -->
-  <rect x="20" y="20" width="472" height="472" rx="105" ry="105" fill="url(#bgGlow)" stroke="url(#goldBorder)" stroke-width="24" stroke-linejoin="round" />
+  <!-- Fondo circular blanco nítido -->
+  <circle cx="300" cy="300" r="294" fill="#FFFFFF"/>
+  <circle cx="300" cy="300" r="280" stroke="#0072FF" stroke-width="8" fill="none"/>
 
-  <!-- GORRO DE CHEF (PARTE SUPERIOR) -->
-  <g transform="translate(160, 48)">
-    <!-- Base y cuerpo del gorro -->
-    <path d="M 38,128 C 36,128 35,116 38,102 C 18,98 8,76 18,52 C 26,32 46,24 64,28 C 74,10 96,2 118,6 C 138,10 152,24 158,40 C 172,36 190,44 196,62 C 202,80 192,100 174,106 C 178,118 174,128 172,128 Z" 
-          fill="#FFFFFF" stroke="#23120B" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
-    <!-- Líneas internas de pliegues del gorro -->
-    <path d="M 68,108 C 66,75 80,48 95,35" fill="none" stroke="#23120B" stroke-width="7" stroke-linecap="round" />
-    <path d="M 125,36 C 135,52 142,78 140,108" fill="none" stroke="#23120B" stroke-width="7" stroke-linecap="round" />
-    <!-- Banda inferior del gorro -->
-    <path d="M 32,122 C 32,122 96,134 178,122 C 184,136 180,154 174,158 C 96,170 36,158 32,142 Z" 
-          fill="#FFFFFF" stroke="#23120B" stroke-width="8" stroke-linejoin="round" />
-  </g>
+  <!-- Órbita dinámico: Swoosh superior derecho -->
+  <path d="M 250,210 C 310,145 440,140 500,195 C 535,225 540,285 515,310 C 530,280 525,230 485,200 C 430,158 315,168 250,210 Z" fill="url(#cymOrbitGrad)"/>
 
-  <!-- TEXTO ESTILIZADO "MenuPy" -->
-  <g filter="url(#shadow)">
-    <!-- Palabra "Menu" en blanco tiza estilo cartoon bold -->
-    <text x="56" y="282" 
-          font-family="'Fredoka', 'Comfortaa', 'Baloo 2', 'Arial Rounded MT Bold', 'Montserrat', sans-serif" 
-          font-size="118" 
-          font-weight="900" 
-          font-style="italic" 
-          fill="#FFFFFF" 
-          stroke="#1F0F09" 
-          stroke-width="14" 
-          paint-order="stroke fill"
-          letter-spacing="-1">Menu</text>
+  <!-- Órbita dinámico: Swoosh inferior izquierdo -->
+  <path d="M 65,290 C 50,380 125,445 245,440 C 290,438 335,410 365,385 C 320,410 270,422 215,415 C 115,402 70,345 65,290 Z" fill="url(#cymOrbitGrad)"/>
 
-    <!-- Palabra "Py" en dorado brillante vibrante -->
-    <text x="338" y="282" 
-          font-family="'Fredoka', 'Comfortaa', 'Baloo 2', 'Arial Rounded MT Bold', 'Montserrat', sans-serif" 
-          font-size="118" 
-          font-weight="900" 
-          font-style="italic" 
-          fill="url(#goldBorder)" 
-          stroke="#1F0F09" 
-          stroke-width="14" 
-          paint-order="stroke fill"
-          letter-spacing="-1">Py</text>
-  </g>
+  <!-- Letra C (Azul marino de alta solidez) -->
+  <path d="M 245,245 C 230,225 205,215 175,215 C 125,215 85,255 85,305 C 85,355 125,395 175,395 C 205,395 230,385 245,365 L 210,340 C 200,352 188,360 175,360 C 145,360 124,335 124,305 C 124,275 145,250 175,250 C 188,250 200,258 210,270 Z" fill="#0A2540"/>
 
-  <!-- ARCO DORADO CURVADO (SWOOSH) DEBAJO DEL TEXTO -->
-  <path d="M 64,332 C 145,302 265,288 385,314" 
-        fill="none" 
-        stroke="url(#goldBorder)" 
-        stroke-width="14" 
-        stroke-linecap="round" />
+  <!-- Letra y (Azul eléctrico brillante estilizada) -->
+  <path d="M 205,248 L 250,248 L 282,328 L 314,248 L 358,248 L 298,375 C 282,410 262,425 228,425 L 205,425 L 205,393 L 222,393 C 238,393 248,385 256,368 L 260,358 Z" fill="url(#cymYGrad)"/>
 
-  <!-- CELULAR / TABLET Y CAMPANA DE COMIDA (PARTE INFERIOR) -->
-  <g transform="translate(170, 318)">
-    <!-- Celular Blanco con Menú Digital -->
-    <g transform="rotate(-6, 40, 60)">
-      <rect x="0" y="0" width="88" height="130" rx="18" ry="18" fill="#FFFFFF" stroke="#23120B" stroke-width="8" />
-      <!-- Barra superior / altavoz -->
-      <rect x="30" y="10" width="28" height="5" rx="2.5" fill="#23120B" />
-      <!-- Ícono de Tenedor en pantalla -->
-      <g transform="translate(18, 30)">
-        <path d="M 4,4 L 4,16 M 10,4 L 10,16 M 16,4 L 16,16 M 4,16 C 4,24 16,24 16,16 M 10,24 L 10,40" 
-              fill="none" stroke="#23120B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
-      </g>
-      <!-- Líneas de lista del Menú -->
-      <line x1="44" y1="36" x2="72" y2="36" stroke="#23120B" stroke-width="5" stroke-linecap="round" />
-      <line x1="44" y1="48" x2="72" y2="48" stroke="#23120B" stroke-width="5" stroke-linecap="round" />
-      <line x1="44" y1="60" x2="66" y2="60" stroke="#23120B" stroke-width="5" stroke-linecap="round" />
-      <!-- Línea divisoria inferior -->
-      <line x1="16" y1="84" x2="72" y2="84" stroke="#23120B" stroke-width="4.5" stroke-linecap="round" />
-      <line x1="16" y1="96" x2="55" y2="96" stroke="#23120B" stroke-width="4.5" stroke-linecap="round" />
-    </g>
+  <!-- Letra M (Azul marino) -->
+  <path d="M 342,217 L 388,217 L 430,306 L 472,217 L 518,217 L 518,393 L 478,393 L 478,280 L 446,346 L 414,346 L 382,280 L 382,393 L 342,393 Z" fill="#0A2540"/>
 
-    <!-- Campana Dorada de Servicio (Cloche Dome) -->
-    <g transform="translate(56, 44)">
-      <!-- Perilla superior -->
-      <circle cx="62" cy="14" r="10" fill="url(#goldCloche)" stroke="#23120B" stroke-width="6" />
-      <!-- Cúpula de la campana -->
-      <path d="M 4,78 C 6,28 118,28 120,78 Z" fill="url(#goldCloche)" stroke="#23120B" stroke-width="8" stroke-linejoin="round" />
-      <!-- Brillo blanco en la cúpula -->
-      <path d="M 22,66 C 24,42 42,34 50,33 C 44,38 32,46 30,66 Z" fill="#FFFFFF" opacity="0.85" />
-      <!-- Plato base inferior -->
-      <rect x="-6" y="78" width="136" height="18" rx="9" ry="9" fill="url(#goldCloche)" stroke="#23120B" stroke-width="7" />
-    </g>
-  </g>
+  <!-- Texto inferior "Software" -->
+  <text x="300" y="492" text-anchor="middle" font-family="'Montserrat', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="62" letter-spacing="3" fill="#0A2540">Software</text>
 </svg>

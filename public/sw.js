@@ -1,19 +1,18 @@
-// Service Worker para Menú Py - Instalación PWA, soporte offline y Notificaciones Push
-const CACHE_NAME = 'menupy-transparent-v6';
+// Service Worker para La Caserita - Instalación PWA, soporte offline y Notificaciones Push
+const CACHE_NAME = 'la-caserita-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/app-logo.png',
   '/app-logo.svg',
+  '/app-logo.png',
   '/app-logo-192.png',
   '/app-logo-512.png',
   '/app-logo-maskable-512.png',
   '/apple-touch-icon.png',
   '/favicon-32.png',
   '/favicon-192.png',
-  '/favicon-512.png',
-  '/logo-menu-py.png'
+  '/favicon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
