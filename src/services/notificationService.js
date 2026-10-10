@@ -227,40 +227,14 @@ export async function dispatchNativePushNotification({
 
 const CUSTOMER_ORDERS_KEY = "lacaserita_customer_orders";
 
-// Deduplica y normaliza listas de pedidos por su ID para evitar claves repetidas o estados duplicados
-export function deduplicateOrders(orderList) {
-  if (!Array.isArray(orderList)) return [];
-  const map = new Map();
-  for (const ord of orderList) {
-    if (!ord || typeof ord !== "object") continue;
-    const rawId = ord.id ? String(ord.id).trim() : "";
-    if (!rawId) {
-      map.set(`anon_${Math.random()}`, ord);
-      continue;
-    }
-    if (!map.has(rawId)) {
-      map.set(rawId, ord);
-    } else {
-      const existing = map.get(rawId);
-      map.set(rawId, {
-        ...existing,
-        ...ord,
-        items: Array.isArray(ord.items) && ord.items.length > 0 ? ord.items : existing.items,
-        totalPrice: ord.totalPrice !== undefined && ord.totalPrice !== null ? ord.totalPrice : existing.totalPrice,
-      });
-    }
-  }
-  return Array.from(map.values());
-}
-
-// Obtiene los pedidos realizados por el usuario en este dispositivo (sin duplicados)
+// Obtiene los pedidos realizados por el usuario en este dispositivo
 export function getCustomerOrders() {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(CUSTOMER_ORDERS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? deduplicateOrders(parsed) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch (e) {
     return [];
   }
@@ -270,34 +244,34 @@ export function getCustomerOrders() {
 export function saveCustomerOrder(order) {
   if (typeof window === "undefined" || !order || !order.id) return;
   try {
-    const rawList = getCustomerOrders();
-    const cleanId = String(order.id).trim();
-    const filteredList = rawList.filter((o) => o && String(o.id).trim() !== cleanId);
-    const existing = rawList.find((o) => o && String(o.id).trim() === cleanId) || {};
-
+    const list = getCustomerOrders();
+    const existingIdx = list.findIndex((o) => o.id === order.id);
     const orderData = {
-      ...existing,
-      ...order,
-      id: cleanId,
-      mode: order.mode || existing.mode || "mesa",
-      tableNumber: order.tableNumber !== undefined ? order.tableNumber : (existing.tableNumber || ""),
-      customerName: order.customerName || existing.customerName || "",
-      customerPhone: order.customerPhone || existing.customerPhone || "",
-      address: order.address || existing.address || "",
-      notes: order.notes || existing.notes || "",
-      items: order.items || existing.items || [],
-      totalItems: order.totalItems !== undefined ? order.totalItems : (existing.totalItems || 0),
-      totalPrice: order.totalPrice !== undefined ? order.totalPrice : (existing.totalPrice || 0),
-      orderStatus: order.orderStatus || existing.orderStatus || (order.paymentStatus === "pagado" ? "completado" : "recibido"),
-      paymentStatus: order.paymentStatus || existing.paymentStatus || "pendiente",
-      paymentMethod: order.paymentMethod || existing.paymentMethod || "",
-      createdAt: existing.createdAt || order.createdAt || new Date().toISOString(),
+      id: order.id,
+      mode: order.mode || "mesa",
+      tableNumber: order.tableNumber || "",
+      customerName: order.customerName || "",
+      customerPhone: order.customerPhone || "",
+      address: order.address || "",
+      notes: order.notes || "",
+      items: order.items || [],
+      totalItems: order.totalItems || 0,
+      totalPrice: order.totalPrice || 0,
+      orderStatus: order.orderStatus || (order.paymentStatus === "pagado" ? "completado" : "recibido"),
+      paymentStatus: order.paymentStatus || "pendiente",
+      paymentMethod: order.paymentMethod || "",
+      createdAt: order.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      lastNotifiedStatus: order.lastNotifiedStatus || existing.lastNotifiedStatus || order.orderStatus || "recibido",
+      lastNotifiedStatus: order.lastNotifiedStatus || order.orderStatus || "recibido",
     };
 
-    const updatedList = [orderData, ...filteredList];
-    localStorage.setItem(CUSTOMER_ORDERS_KEY, JSON.stringify(updatedList.slice(0, 30)));
+    if (existingIdx >= 0) {
+      list[existingIdx] = { ...list[existingIdx], ...orderData };
+    } else {
+      list.unshift(orderData);
+    }
+
+    localStorage.setItem(CUSTOMER_ORDERS_KEY, JSON.stringify(list.slice(0, 30)));
     return orderData;
   } catch (e) {
     console.warn("[PushNotifications] Error al guardar pedido del cliente:", e);

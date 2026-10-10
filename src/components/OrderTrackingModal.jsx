@@ -23,8 +23,7 @@ import {
   requestPushPermission,
   sendTestPushNotification,
   getCustomerOrders,
-  getSyncChannel,
-  deduplicateOrders,
+  getSyncChannel
 } from "../services/notificationService";
 
 export const OrderTrackingModal = ({
@@ -44,8 +43,7 @@ export const OrderTrackingModal = ({
 
   // Cargar pedidos del cliente
   const loadOrders = () => {
-    const rawList = (customerOrders && customerOrders.length > 0) ? customerOrders : getCustomerOrders();
-    const list = deduplicateOrders(rawList);
+    const list = (customerOrders && customerOrders.length > 0) ? customerOrders : getCustomerOrders();
     setOrders(list);
     if (list.length > 0) {
       if (selectedOrderId && list.some((o) => o.id === selectedOrderId)) {
@@ -321,12 +319,12 @@ export const OrderTrackingModal = ({
               {orders.length > 1 && (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <span className="text-xs font-bold text-stone-500 flex-shrink-0">Tus Pedidos:</span>
-                  {orders.map((ord, ordIdx) => {
+                  {orders.map((ord) => {
                     const isSelected = ord.id === currentOrder?.id;
                     const st = ORDER_STATUS_CONFIG[ord.orderStatus] || ORDER_STATUS_CONFIG.recibido;
                     return (
                       <button
-                        key={ord.id ? `trk_${ord.id}_${ordIdx}` : `trk_idx_${ordIdx}`}
+                        key={ord.id}
                         type="button"
                         onClick={() => setSelectedOrderId(ord.id)}
                         className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 flex-shrink-0 border ${

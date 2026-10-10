@@ -225,13 +225,8 @@ export async function signInWithGoogle() {
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
 
-    // Recuperar perfil previo si existe en Firestore (de forma segura con tolerancia a fallas)
-    let existingProfile = null;
-    try {
-      existingProfile = await getUserProfileFromFirestore(user.uid);
-    } catch (profErr) {
-      console.warn("Aviso al consultar perfil en Firestore:", profErr);
-    }
+    // Recuperar perfil previo si existe en Firestore
+    let existingProfile = await getUserProfileFromFirestore(user.uid);
 
     // Si no existe, inicializar con datos de Google
     if (!existingProfile) {
@@ -255,11 +250,7 @@ export async function signInWithGoogle() {
         licensePlan: isSuper ? "Plan Maestro" : null,
         licenseStatus: isSuper ? "activado" : "sin_licencia",
       };
-      try {
-        await saveUserProfileToFirestore(user.uid, initialProfile);
-      } catch (saveErr) {
-        console.warn("Aviso al guardar perfil inicial en Firestore:", saveErr);
-      }
+      await saveUserProfileToFirestore(user.uid, initialProfile);
       existingProfile = initialProfile;
     } else {
       // Actualizar último acceso
@@ -277,28 +268,17 @@ export async function signInWithGoogle() {
         displayName: user.displayName || user.email?.split("@")[0] || "Usuario Google",
         photoURL: user.photoURL || "",
         profile: existingProfile,
-        getIdToken: (forceRefresh) => user.getIdToken(forceRefresh),
-        getIdTokenResult: (forceRefresh) => user.getIdTokenResult(forceRefresh),
       },
-      firebaseUser: user,
     };
   } catch (err) {
     console.error("Error al iniciar sesión con Google:", err);
     let message = "No se pudo completar el inicio de sesión con Google.";
     if (err.code === "auth/popup-closed-by-user") {
-      message = "Se cerró la ventana de inicio de sesión de Google antes de finalizar.";
+      message = "Se cerró la ventana de inicio de sesión de Google.";
     } else if (err.code === "auth/popup-blocked") {
-      message = "El navegador bloqueó la ventana emergente de Google. Habilitá las ventanas emergentes en tu navegador para continuar con Google, o ingresá con tu Usuario y PIN de seguridad.";
+      message = "El navegador bloqueó la ventana emergente de Google. Habilitá las ventanas emergentes e intentá de nuevo.";
     } else if (err.code === "auth/cancelled-popup-request") {
-      message = "Operación cancelada por otra solicitud en curso.";
-    } else if (err.code === "auth/unauthorized-domain") {
-      message = "Dominio no autorizado en Firebase Auth. Podés ingresar con tu Usuario y PIN de seguridad.";
-    } else if (err.code === "auth/operation-not-allowed") {
-      message = "El acceso con Google no está habilitado en Firebase. Podés ingresar con tu Usuario y PIN de seguridad.";
-    } else if (err.code === "auth/network-request-failed") {
-      message = "Error de red al conectar con Google. Verificá tu conexión a internet.";
-    } else if (err.message) {
-      message = `Aviso Google: ${err.message}`;
+      message = "Operación cancelada.";
     }
     return { ok: false, error: message, code: err.code };
   }
