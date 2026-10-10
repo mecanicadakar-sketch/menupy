@@ -489,6 +489,11 @@ export function findStore(db, identifier) {
     if (s.ownerEmail && s.ownerEmail.split("@")[0].toLowerCase() === clean) return s;
     if (s.email && s.email.split("@")[0].toLowerCase() === clean) return s;
     if (s.username && s.username.includes("@") && s.username.split("@")[0].toLowerCase() === clean) return s;
+    // Coincidencia por nombre de fantasía / slug limpio del local (ej: "La Caserita" -> "lacaserita")
+    if (s.business?.name) {
+      const bizSlug = String(s.business.name).toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (bizSlug && (bizSlug === clean || bizSlug === cleanNoDash)) return s;
+    }
     // Coincidencia por código de licencia (con o sin guiones)
     if (s.business?.licenseCode) {
       const licClean = String(s.business.licenseCode).toLowerCase().replace(/[\s-]+/g, "");
@@ -521,7 +526,8 @@ export function findStore(db, identifier) {
       const rUser = String(r.requestedUser || "").toLowerCase();
       const rEmail = String(r.email || "").toLowerCase();
       const rSlug = rUser.split("@")[0];
-      return rUser === clean || rEmail === clean || rSlug === clean;
+      const rBizSlug = String(r.businessName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      return rUser === clean || rEmail === clean || rSlug === clean || (rBizSlug && (rBizSlug === clean || rBizSlug === cleanNoDash));
     });
     if (reg) {
       const storeKey = (reg.requestedUser || "").toLowerCase();

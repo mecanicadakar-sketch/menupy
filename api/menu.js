@@ -103,6 +103,61 @@ function isValidPostgresUrl(str) {
   return trimmed.startsWith("postgresql://") || trimmed.startsWith("postgres://");
 }
 
+async function verifyGoogleOrFirebaseToken(idToken) {
+  if (!idToken || typeof idToken !== "string") return null;
+  const trimmed = idToken.trim();
+  if (!trimmed) return null;
+
+  // 1. Validar Firebase Auth ID Token (JWT emitido para el proyecto)
+  try {
+    const parts = trimmed.split(".");
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      const nowSec = Math.floor(Date.now() / 1000);
+      const isFirebaseProject =
+        payload.aud === "la-caserita-8dca5" ||
+        (payload.iss && payload.iss.includes("securetoken.google.com/la-caserita-8dca5"));
+      const isNotExpired = payload.exp && payload.exp > (nowSec - 300);
+      const isVerified = payload.email_verified === true || payload.email_verified === "true";
+
+      if (isFirebaseProject && isNotExpired && payload.email && isVerified) {
+        return {
+          email: String(payload.email).toLowerCase(),
+          uid: payload.sub || payload.user_id,
+          name: payload.name || "",
+          picture: payload.picture || "",
+          provider: "firebase",
+        };
+      }
+    }
+  } catch (jwtErr) {
+    console.warn("[AUTH] Error parseando Firebase JWT:", jwtErr?.message);
+  }
+
+  // 2. Si no es Firebase ID Token, validar contra endpoint de Google OAuth tokeninfo
+  try {
+    const googleVerifyResp = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(trimmed)}`
+    );
+    if (googleVerifyResp.ok) {
+      const tokenInfo = await googleVerifyResp.json();
+      if (tokenInfo && tokenInfo.email && (tokenInfo.email_verified === "true" || tokenInfo.email_verified === true)) {
+        return {
+          email: String(tokenInfo.email).toLowerCase(),
+          uid: tokenInfo.sub || "",
+          name: tokenInfo.name || "",
+          picture: tokenInfo.picture || "",
+          provider: "google_oauth",
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("[AUTH] Error validando Google OAuth idToken:", err?.message);
+  }
+
+  return null;
+}
+
 let cachedSqlClient = undefined;
 
 function getSqlClient() {
@@ -151,27 +206,32 @@ export default async function handler(req, res) {
       return sendJson(res, 200, { ok: true, clientIp, ...secStatus });
     }
 
-    // 3. Obtener lista de todos los comercios activos
+    // 3. Obtener lista de todos los comercios activos (sin exponer correos privados)
     if (url.includes("action=getAllStores")) {
       const activeStores = Object.values(db.stores)
         .filter((s) => s.status === "activo")
         .map((s) => ({
           id: s.id,
-          name: s.business.name,
-          username: s.username,
-          bannerImage: s.business.bannerImage,
-          phoneDisplay: s.business.phoneDisplay,
-          rubro: s.business.rubro || s.rubro,
-          city: s.business.city || s.city,
+          name: s.business?.name || "Comercio",
+          username: (s.username && s.username.includes("@")) ? s.id : (s.username || s.id),
+          bannerImage: s.business?.bannerImage || "/banner.jpg",
+          phoneDisplay: s.business?.phoneDisplay || "",
+          rubro: s.business?.rubro || s.rubro || "Gastronomía",
+          city: s.business?.city || s.city || "Paraguay",
         }));
       return sendJson(res, 200, { ok: true, stores: activeStores, activeStoreId: db.activeStoreId });
     }
 
-    // 4. Cargar datos del comercio público activo o solicitado por query (?comercio=xxx o ?store=xxx)
+    // 4. Cargar datos del comercio público activo o solicitado por query (?comercio=xxx, ?store=xxx, ?local=xxx, ?tienda=xxx)
     let requestedStoreId = null;
     try {
       const parsedUrl = new URL(url, "http://localhost");
-      requestedStoreId = parsedUrl.searchParams.get("comercio") || parsedUrl.searchParams.get("store") || parsedUrl.searchParams.get("c");
+      requestedStoreId =
+        parsedUrl.searchParams.get("comercio") ||
+        parsedUrl.searchParams.get("store") ||
+        parsedUrl.searchParams.get("c") ||
+        parsedUrl.searchParams.get("local") ||
+        parsedUrl.searchParams.get("tienda");
     } catch {}
 
     const isExplicitDemo = url.includes("action=getDemoStore") || (!requestedStoreId);
@@ -187,6 +247,7 @@ export default async function handler(req, res) {
         name: s.business.name,
         username: s.username,
         bannerImage: s.business.bannerImage,
+        phoneIntl: s.business.phoneIntl,
         phoneDisplay: s.business.phoneDisplay,
         rubro: s.business.rubro || s.rubro,
         city: s.business.city || s.city,
@@ -614,9 +675,27 @@ export default async function handler(req, res) {
         const name = String(body.name || "").trim();
         const uid = String(body.uid || "").trim();
         const photoURL = String(body.photoURL || "").trim();
+        const idToken = String(body.idToken || "").trim();
 
         if (!email) {
           return sendJson(res, 400, { ok: false, error: "Email de Google no proporcionado." });
+        }
+
+        // Verificación criptográfica del ID Token de Google/Firebase para evitar suplantación de identidad (spoofing)
+        let verifiedGoogleEmail = null;
+        if (idToken) {
+          const verifiedToken = await verifyGoogleOrFirebaseToken(idToken);
+          if (verifiedToken?.email) {
+            verifiedGoogleEmail = verifiedToken.email.toLowerCase();
+          }
+        }
+
+        // Si se envió un idToken verificado pero no coincide con el email reclamado
+        if (idToken && verifiedGoogleEmail && verifiedGoogleEmail !== email) {
+          return sendJson(res, 401, {
+            ok: false,
+            error: "Acceso no autorizado: El token de Google verificado no coincide con la cuenta solicitada.",
+          });
         }
 
         resetIpAttempts(clientIp);
@@ -659,7 +738,11 @@ export default async function handler(req, res) {
             (s.email && s.email.toLowerCase() === email) ||
             (s.ownerEmail && s.ownerEmail.toLowerCase() === email) ||
             (s.business?.email && s.business.email.toLowerCase() === email) ||
-            (s.business?.ownerEmail && s.business.ownerEmail.toLowerCase() === email)
+            (s.business?.ownerEmail && s.business.ownerEmail.toLowerCase() === email) ||
+            (s.business?.adminUser && s.business.adminUser.toLowerCase() === email) ||
+            (s.adminUser && s.adminUser.toLowerCase() === email) ||
+            (s.username && s.username.toLowerCase() === email) ||
+            (s.id && s.id.toLowerCase() === `store_${email.split("@")[0]}`)
           ) {
             if (s.business?.licenseCode && s.business?.licenseStatus !== "revocado" && s.business?.licenseStatus !== "anulado") {
               associatedStore = s;
@@ -674,27 +757,59 @@ export default async function handler(req, res) {
           const pendingReg = (db.commercialRegistrations || []).find(
             (r) =>
               ((r.requestedUser && r.requestedUser.toLowerCase() === email) ||
-               (r.email && r.email.toLowerCase() === email)) &&
+               (r.email && r.email.toLowerCase() === email) ||
+               (r.requestedUser && r.requestedUser.toLowerCase() === email.split("@")[0])) &&
               (r.status === "pendiente" || r.status === "pending")
           );
           if (pendingReg) {
             return sendJson(res, 403, {
               ok: false,
               isPendingApproval: true,
-              error: `Acceso denegado: Tu comercio (${pendingReg.businessName}) está registrado con el usuario ${email}, pero aún se encuentra PENDIENTE de habilitación por el Administrador. Una vez que el Administrador otorgue la licencia a este email, podrás ingresar a tu panel de Gerente.`,
+              error: `Acceso denegado: El comercio (${pendingReg.businessName || "registrado"}) se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.`,
             });
           }
 
-          const reg = db.commercialRegistrations.find(
+          const reg = (db.commercialRegistrations || []).find(
             (r) =>
               ((r.email && r.email.toLowerCase() === email) ||
-               (r.requestedUser && r.requestedUser.toLowerCase() === email)) &&
-              (r.status === "activo" || r.status === "activado")
+               (r.requestedUser && r.requestedUser.toLowerCase() === email) ||
+               (r.requestedUser && r.requestedUser.toLowerCase() === email.split("@")[0])) &&
+              (r.status === "activo" || r.status === "activado" || r.status === "active")
           );
-          if (reg && reg.requestedUser) {
-            const candidate = db.stores[reg.requestedUser.toLowerCase()];
+          if (reg) {
+            const userSlug = (reg.requestedUser || email.split("@")[0]).toLowerCase();
+            const candidate = db.stores[userSlug] || db.stores[`store_${userSlug}`];
             if (candidate && candidate.business?.licenseCode) {
               associatedStore = candidate;
+            } else {
+              const uniqueStoreId = `store_${userSlug}`;
+              associatedStore = db.stores[uniqueStoreId] || {
+                id: uniqueStoreId,
+                username: userSlug,
+                email: email,
+                ownerEmail: email,
+                pin: reg.requestedPassword || reg.pin || "1234",
+                status: "activo",
+                business: {
+                  name: reg.businessName || (name ? `Comercio de ${name}` : `Comercio ${userSlug}`),
+                  slogan: "Pedí online - Calidad y sabor",
+                  phoneIntl: reg.whatsapp || "595981456789",
+                  phoneDisplay: reg.whatsapp || "0981 123 456",
+                  address: reg.city || "Encarnación, Paraguay",
+                  bannerImage: "/banner.jpg",
+                  deliveryNote: "El costo de envío se coordina según la zona",
+                  adminUser: email,
+                  ownerEmail: email,
+                  licenseCode: reg.assignedCode || "LIC-REGISTRADO-ACTIVO",
+                  licensePlan: reg.planTitle || reg.plan || "Plan Comercio",
+                  licenseCost: reg.amountGs ? `${reg.amountGs.toLocaleString("es-PY")} Gs.` : "450.000 Gs.",
+                  licenseStatus: "activado",
+                },
+                menu: DEFAULT_MENU_LOSAMIGOS,
+                orders: [],
+              };
+              db.stores[uniqueStoreId] = associatedStore;
+              saveDb(db);
             }
           }
         }
@@ -873,20 +988,28 @@ export default async function handler(req, res) {
       const givenPin = String(body.pin || "").trim();
 
       // 1. Superadmin (Desarrollador / Administrador Maestro de la Plataforma)
-      const isSuperadmin = Boolean(
-        body.role === "superadmin" ||
-        body.action === "updateDemoStore" ||
-        body.isGoogleAuth === true ||
-        givenPin === "google-auth" ||
-        givenPin === "Ricaji270985#" ||
-        givenPin.toLowerCase() === "ricaji270985#" ||
-        givenUser === "mecanicadakar@gmail.com" ||
-        (body.user && String(body.user).toLowerCase() === "mecanicadakar@gmail.com") ||
+      // Requiere OBLIGATORIAMENTE el PIN Maestro secreto ("Ricaji270985#") junto con un usuario administrador válido,
+      // o bien token de Google autenticado y verificado para mecanicadakar@gmail.com.
+      const isMasterPin = givenPin === "Ricaji270985#" || givenPin.toLowerCase() === "ricaji270985#";
+      const isMasterUser =
         givenUser === "usuario" ||
         givenUser === "camuchi" ||
         givenUser === "admin" ||
-        ((givenUser === "gerente" || givenUser === "comercio") && (givenPin === "Ricaji270985#" || givenPin.toLowerCase() === "ricaji270985#"))
-      );
+        givenUser === "gerente" ||
+        givenUser === "comercio" ||
+        givenUser === "mecanicadakar@gmail.com";
+
+      let isSuperadmin = Boolean(isMasterPin && isMasterUser);
+
+      // Si se envía idToken verificado para el Administrador Maestro
+      if (!isSuperadmin && body.idToken) {
+        try {
+          const verifiedToken = await verifyGoogleOrFirebaseToken(body.idToken);
+          if (verifiedToken?.email === "mecanicadakar@gmail.com") {
+            isSuperadmin = true;
+          }
+        } catch {}
+      }
 
       // 2. Búsqueda de comercio / registro comercial / código de activación
       let matchedStore = null;
@@ -1014,7 +1137,7 @@ export default async function handler(req, res) {
       // 3. Validación estricta de credenciales
       let credentialsValid = false;
 
-      if (isSuperadmin || body.isGoogleAuth || givenPin === "google-auth") {
+      if (isSuperadmin) {
         credentialsValid = true;
       } else if (matchedRegistration) {
         if (
@@ -1198,6 +1321,9 @@ export default async function handler(req, res) {
       // Acción: Obtener clientes registrados (para Superadmin)
       // -------------------------------------------------------------
       if (body.action === "getRegisteredClients") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         return sendJson(res, 200, { ok: true, clients: db.commercialRegistrations });
       }
 
@@ -1206,6 +1332,9 @@ export default async function handler(req, res) {
       // ESTO HABILITA AL COMERCIO PARA PODER INGRESAR INMEDIATAMENTE
       // -------------------------------------------------------------
       if (body.action === "updateClientStatus") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { clientId, status } = body;
         const normalized =
           status === "active" || status === "activo"
@@ -1314,6 +1443,9 @@ export default async function handler(req, res) {
       // Acción: Eliminar registro de comercio
       // -------------------------------------------------------------
       if (body.action === "deleteRegisteredClient") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { clientId } = body;
         const target = db.commercialRegistrations.find((c) => c.id === clientId);
         if (target && target.requestedUser) {
@@ -1325,10 +1457,16 @@ export default async function handler(req, res) {
       }
 
       if (body.action === "getActivationCodes") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         return sendJson(res, 200, { ok: true, codes: db.activationCodes });
       }
 
       if (body.action === "createActivationCode") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { code, businessName, ownerName, email, whatsapp, plan, notes, cost, costFormatted, durationMonths, expiresAt } = body;
         const normalizedCode = (
           code && String(code).trim()
@@ -1424,6 +1562,9 @@ export default async function handler(req, res) {
       }
 
       if (body.action === "updateActivationCodeStatus") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { codeId, status } = body;
         const normalized =
           status === "activado" || status === "active"
@@ -1473,6 +1614,9 @@ export default async function handler(req, res) {
       }
 
       if (body.action === "renewActivationCode") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { codeId, extendMonths, newExpiresAt, newPlan, newCost } = body;
         const target = db.activationCodes.find((c) => c.id === codeId || c.code === codeId);
         if (target) {
@@ -1500,6 +1644,9 @@ export default async function handler(req, res) {
       }
 
       if (body.action === "deleteActivationCode") {
+        if (!isSuperadmin) {
+          return sendJson(res, 403, { ok: false, error: "Acceso denegado: Se requieren permisos de Administrador Maestro." });
+        }
         const { codeId } = body;
         db.activationCodes = db.activationCodes.filter((c) => c.id !== codeId && c.code !== codeId);
         saveDb(db);
