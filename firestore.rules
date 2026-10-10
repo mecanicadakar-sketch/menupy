@@ -10,18 +10,29 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Perfiles y configuraciones del negocio del usuario indexados por UID
-    match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create, update: if isOwner(userId);
-      allow delete: if false;
+    function isMasterAdmin() {
+      return isSignedIn() && request.auth.token.email == 'mecanicadakar@gmail.com' && request.auth.token.email_verified == true;
     }
 
-    // Colección de comercios
+    // Default deny for all unspecified collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Perfiles y configuraciones del negocio del usuario indexados por UID (PII Isolation)
+    // Solo el dueño de la cuenta o el administrador general pueden acceder a datos personales y configuración
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isMasterAdmin();
+      allow create, update: if isOwner(userId) || isMasterAdmin();
+      allow delete: if isMasterAdmin();
+    }
+
+    // Colección de comercios públicos
+    // La lectura de menús y datos públicos es abierta, pero la modificación está restringida al dueño o admin
     match /stores/{storeId} {
       allow read: if true;
-      allow create, update: if isSignedIn();
-      allow delete: if false;
+      allow create, update: if isSignedIn() && (isOwner(storeId) || isMasterAdmin());
+      allow delete: if isMasterAdmin();
     }
 
     // Documento de verificación de conexión
