@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "La Caserita Rotisería",
-  "short_name": "La Caserita",
-  "description": "App de pedidos online para La Caserita Rotisería con menú interactivo, selección de mesa, delivery y retiro.",
+  "name": "Menú Py",
+  "short_name": "Menú Py",
+  "description": "Menú Py - App de pedidos online con menú interactivo, selección de mesa, delivery y retiro directo por WhatsApp.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

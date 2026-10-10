@@ -1,29 +1,28 @@
-// Service Worker para La Caserita - Instalación PWA, soporte offline y Notificaciones Push
-const CACHE_NAME = 'la-caserita-v2';
+// Service Worker para Menú Py - Instalación PWA, soporte offline y Notificaciones Push
+const CACHE_NAME = 'menupy-transparent-v7';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
-  '/app-logo.svg',
   '/app-logo.png',
+  '/app-logo.svg',
   '/app-logo-192.png',
   '/app-logo-512.png',
   '/app-logo-maskable-512.png',
   '/apple-touch-icon.png',
   '/favicon-32.png',
   '/favicon-192.png',
-  '/favicon-512.png'
+  '/favicon-512.png',
+  '/logo-menu-py.png'
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('Pre-cache parcial de recursos:', err);
+        console.warn('Pre-cache parcial de recursos estáticos:', err);
       });
     })
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -32,29 +31,58 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
+            console.log('[SW] Eliminando caché antigua:', key);
             return caches.delete(key);
           }
         })
       );
+    }).then(() => {
+      return self.clients.claim();
     })
   );
-  self.clients.claim();
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
-  // Solo interceptar peticiones GET dentro del mismo origen o fuentes
+  // Solo interceptar peticiones GET
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Evitar interceptar llamadas a API dinámicas
+  // Evitar interceptar llamadas a API
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
+  // 1. REGLA CRÍTICA: Para navegación y HTML (index.html o la raíz), SIEMPRE ir a la RED PRIMERO (Network-First).
+  // Esto garantiza que cualquier actualización desplegada se muestre inmediatamente en el navegador.
+  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          // Si no hay internet, recurrir a la copia en caché offline
+          return caches.match(event.request).then((cached) => cached || caches.match('/'));
+        })
+    );
+    return;
+  }
+
+  // 2. Para otros recursos estáticos (imágenes, iconos): Stale-While-Revalidate
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Devolver recurso en caché y actualizar en segundo plano
+        // Devolver recurso en caché y refrescar en segundo plano
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
@@ -62,14 +90,7 @@ self.addEventListener('fetch', (event) => {
         }).catch(() => {});
         return cachedResponse;
       }
-      return fetch(event.request).then((networkResponse) => {
-        return networkResponse;
-      }).catch(() => {
-        // En caso de fallo de red, si es navegación, devolver página principal
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
-      });
+      return fetch(event.request);
     })
   );
 });
