@@ -242,6 +242,36 @@ function createDefaultDb() {
           },
         ],
       },
+      "lacaserita": {
+        id: "lacaserita",
+        username: "caserita",
+        pin: "comercio123",
+        status: "activo",
+        business: {
+          name: "La Caserita",
+          slogan: "Sabor casero y tradicional - Comida rica todos los días",
+          phoneIntl: "595975635770",
+          phoneDisplay: "0975 635 770",
+          address: "Encarnación, Paraguay",
+          bannerImage: "/banner.jpg",
+          deliveryNote: "El costo de envío se coordina según la zona",
+          rubro: "Gastronomía Tradicional",
+          city: "Encarnación",
+          schedule: "Lun a Dom: 10:30 a 14:30 y 19:00 a 23:30",
+          adminUser: "caserita",
+          licenseCode: "CAS-7K9B-X2M4",
+          licensePlan: "Plan Anual PRO (1 Año)",
+          licenseCost: "1.000.000 Gs. / año",
+          licenseCostGs: 1000000,
+          licenseDuration: "12 meses",
+          licenseStatus: "activado",
+          licenseActivatedAt: "2026-03-01T12:00:00.000Z",
+          licenseExpiresAt: "2027-03-01T12:00:00.000Z",
+          licenseNotes: "Licencia Anual oficial para comercio La Caserita",
+        },
+        menu: DEFAULT_MENU_LOSAMIGOS,
+        orders: [],
+      },
       "burgerhouse": {
         id: "burgerhouse",
         username: "burgerhouse",
@@ -537,8 +567,48 @@ export function findStore(db, identifier) {
     }
   }
 
-  // 5. Coincidencias para tiendas de demostración / iniciales
-  if (clean === "menupy" || clean === "menu_py" || clean === "menu-py" || clean === "losamigos" || clean === "gerente" || clean === "comercio" || clean === "demo" || clean === "caserita") {
+  // 5. Coincidencias específicas para La Caserita y comercios demo
+  if (
+    clean === "lacaserita" ||
+    clean === "caserita" ||
+    clean === "la caserita" ||
+    clean === "la-caserita" ||
+    clean === "la_caserita" ||
+    cleanNoDash === "lacaserita" ||
+    cleanNoDash === "caserita"
+  ) {
+    if (!db.stores["lacaserita"]) {
+      db.stores["lacaserita"] = {
+        id: "lacaserita",
+        username: "caserita",
+        pin: "comercio123",
+        status: "activo",
+        business: {
+          name: "La Caserita",
+          slogan: "Sabor casero y tradicional - Comida rica todos los días",
+          phoneIntl: "595975635770",
+          phoneDisplay: "0975 635 770",
+          address: "Encarnación, Paraguay",
+          bannerImage: "/banner.jpg",
+          deliveryNote: "El costo de envío se coordina según la zona",
+          rubro: "Gastronomía Tradicional",
+          city: "Encarnación",
+          adminUser: "caserita",
+          licenseCode: "CAS-7K9B-X2M4",
+          licensePlan: "Plan Anual PRO (1 Año)",
+          licenseCost: "1.000.000 Gs. / año",
+          licenseStatus: "activado",
+          licenseExpiresAt: new Date(Date.now() + 365 * 24 * 3600000).toISOString(),
+        },
+        menu: DEFAULT_MENU_LOSAMIGOS,
+        orders: [],
+      };
+    }
+    return db.stores["lacaserita"] || db.stores["caserita"] || Object.values(db.stores)[0];
+  }
+
+  // 6. Coincidencias para tiendas de demostración / iniciales
+  if (clean === "menupy" || clean === "menu_py" || clean === "menu-py" || clean === "losamigos" || clean === "gerente" || clean === "comercio" || clean === "demo") {
     return db.stores["menupy"] || db.stores["losamigos"] || Object.values(db.stores)[0] || null;
   }
 
