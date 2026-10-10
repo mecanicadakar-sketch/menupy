@@ -11,10 +11,12 @@ import {
   Map, Crosshair, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   FileText, Download, MessageCircle, CheckCheck,
   Bell, BellRing, ChefHat, Volume2, LogOut, UserPlus, Pencil,
-  Maximize2, Minimize2
+  Maximize2, Minimize2, Smartphone, Flame, ArrowRight, TrendingUp
 } from "lucide-react";
 import InstallAppModal from "./components/InstallAppModal.jsx";
+import RestaurantQrModal from "./components/RestaurantQrModal.jsx";
 import { OrderTrackingModal } from "./components/OrderTrackingModal.jsx";
+import menuPyLogo from "./assets/images/logo-menu-py.png";
 import {
   ORDER_STATUS_CONFIG,
   getNotificationPermission,
@@ -25,6 +27,7 @@ import {
   getCustomerOrders,
   updateCustomerOrderStatus,
   getSyncChannel,
+  deduplicateOrders,
 } from "./services/notificationService.js";
 import {
   auth,
@@ -42,6 +45,15 @@ import {
    ========================================================================= */
 
 const SHEETS_API_URL = "/api/menu"; 
+const getSimulatorShareUrl = () => {
+  try {
+    if (typeof window !== "undefined" && window.location) {
+      return `${window.location.origin}${window.location.pathname}?simulador=true`;
+    }
+  } catch {}
+  return "/?simulador=true";
+};
+const SIMULATOR_APP_URL = "/?simulador=true"; 
 
 const BRAND = {
   charcoal: "#2A2018",
@@ -598,7 +610,7 @@ class AdminErrorBoundary extends Component {
     return { hasError: true, error };
   }
   componentDidCatch(error, errorInfo) {
-    console.error("[AI Studio] Admin section error:", error, errorInfo);
+    console.error("[Menu Py] Admin section error:", error, errorInfo);
   }
   handleResetLocalData = () => {
     try {
@@ -900,6 +912,25 @@ export default function App() {
   // Ventana emergente al iniciar para instalar la app (PWA con logo de CyM / Caserita)
   const [showInstallModal, setShowInstallModal] = useState(false);
 
+  // Modal de generación de códigos QR de restaurante y mesas
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrModalStoreId, setQrModalStoreId] = useState(null);
+
+  const openRestaurantQrModal = (targetStoreId = null) => {
+    // Protección de seguridad: solo expuesto a Administrador y/o Gerente autenticado
+    const hasAccess = Boolean(
+      (view === "admin" && adminRole !== "staff") ||
+      (adminSession && adminSession.active && adminSession.role !== "staff")
+    );
+    if (!hasAccess) {
+      addToast("warning", "Acceso Exclusivo", "El generador de códigos QR es exclusivo para la Gerencia y Administración del local.");
+      return;
+    }
+    const activeStore = targetStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || business?.storeId || "losamigos";
+    setQrModalStoreId(activeStore);
+    setShowQrModal(true);
+  };
+
   useEffect(() => {
     // Si la app ya está instalada y corriendo en pantalla completa, no mostrar
     const isStandalone =
@@ -935,7 +966,7 @@ export default function App() {
     }
   }, []);
 
-  // Comprobar parámetros de URL al cargar (?trackOrderId=PED-XXXX)
+  // Comprobar parámetros de URL al cargar (?trackOrderId=PED-XXXX o ?mesa=4 o ?modo=xxx o ?qr=true)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -943,6 +974,21 @@ export default function App() {
       if (trackId) {
         setTrackingOrderId(trackId);
         setTrackingModalOpen(true);
+      }
+      const mesaParam = params.get("mesa");
+      if (mesaParam) {
+        setTableNumber(mesaParam.trim());
+        setMode("mesa");
+        addToast(
+          "order_success",
+          `¡Mesa ${mesaParam.trim()} Seleccionada!`,
+          "Tu mesa ya está asignada automáticamente para hacer tus pedidos."
+        );
+      }
+      // Parámetros de vista
+      const modoParam = params.get("modo");
+      if (modoParam && (modoParam === "mesa" || modoParam === "delivery" || modoParam === "retiro")) {
+        setMode(modoParam);
       }
     } catch (e) {}
   }, []);
@@ -1122,7 +1168,15 @@ export default function App() {
   };
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [mode, setMode] = useState("mesa"); // "mesa" | "delivery" | "retiro"
+  const [mode, setMode] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const m = p.get("modo");
+      if (m === "mesa" || m === "delivery" || m === "retiro") return m;
+      if (p.get("mesa")) return "mesa";
+    } catch {}
+    return "mesa";
+  });
   const [customerName, setCustomerName] = useState(() => {
     try {
       return localStorage.getItem("lacaserita_customer_name") || "";
@@ -1137,7 +1191,13 @@ export default function App() {
       return "";
     }
   });
-  const [tableNumber, setTableNumber] = useState("");
+  const [tableNumber, setTableNumber] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return p.get("mesa") ? p.get("mesa").trim() : "";
+    } catch {}
+    return "";
+  });
   const [tableError, setTableError] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
@@ -1414,6 +1474,18 @@ export default function App() {
   };
 
   const [view, setView] = useState("menu"); // "menu" | "adminLogin" | "admin" | "register"
+  const [showSimulatorModal, setShowSimulatorModal] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("appParams") === "simulador" || params.get("simulador") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [simulatorTab, setSimulatorTab] = useState("client"); // "client" | "kitchen" | "cashier" | "benefits"
+  const [simClientMode, setSimClientMode] = useState("delivery"); // "delivery" | "mesa" | "retiro"
+  const [simOrderStatus, setSimOrderStatus] = useState("en_preparacion"); // "pendiente" | "en_preparacion" | "entregado"
+  const [simCopiedLink, setSimCopiedLink] = useState(false);
   const [adminTab, setAdminTab] = useState("orders"); // "orders" | "history" | "menu" | "staff" | "business" | "clients"
   const [adminRole, setAdminRole] = useState(() => {
     try {
@@ -1433,6 +1505,12 @@ export default function App() {
       setAdminTab("orders");
     }
   }, [adminRole, adminTab]);
+
+  // Privilegios exclusivos de Administrador y/o Gerente autenticado
+  const isManagerOrAdmin = Boolean(
+    (view === "admin" && adminRole !== "staff") ||
+    (adminSession && adminSession.active && adminSession.role !== "staff")
+  );
 
   const [loginMode, setLoginMode] = useState("owner"); // "owner" | "staff" | "superadmin"
   const [userInput, setUserInput] = useState("");
@@ -1461,7 +1539,8 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthChange(async (user) => {
       if (user) {
-        const isSuper = user.email === "mecanicadakar@gmail.com";
+        const userEmail = (user.email || "").trim().toLowerCase();
+        const isSuper = userEmail === "mecanicadakar@gmail.com";
         const hasAdminRole = sessionStorage.getItem("caserita_auth_role");
         
         // Solo cargar datos si el usuario tiene una sesión de administración autorizada
@@ -1538,22 +1617,32 @@ export default function App() {
     try {
       const res = await signInWithGoogle();
       if (!res.ok) {
-        if (res.error && !res.error.includes("cerró") && !res.error.includes("cancelada")) {
-          setPinError(res.error);
-        }
+        setPinError(res.error || "No se completó el acceso con Google. Si tu navegador bloqueó la ventana emergente, permitila o ingresá con tu Usuario y PIN de seguridad.");
+        setGoogleLoading(false);
         return;
       }
       const gUser = res.user;
+      let idToken = "";
+      try {
+        if (typeof gUser?.getIdToken === "function") {
+          idToken = await gUser.getIdToken();
+        } else if (auth?.currentUser) {
+          idToken = await auth.currentUser.getIdToken();
+        }
+      } catch (tokErr) {
+        console.warn("Aviso al obtener idToken de Google:", tokErr);
+      }
 
       // 1. Acceso Exclusivo para Administrador General Maestro (Superadmin)
-      const isMasterGoogle = gUser.email === "mecanicadakar@gmail.com";
+      const userEmail = (gUser.email || "").trim().toLowerCase();
+      const isMasterGoogle = userEmail === "mecanicadakar@gmail.com";
       if (isMasterGoogle) {
         setGoogleUser(gUser);
         try {
           sessionStorage.setItem("caserita_google_user", JSON.stringify(gUser));
           sessionStorage.setItem("caserita_auth_google_uid", gUser.uid);
-          sessionStorage.setItem("caserita_auth_user", gUser.email);
-          sessionStorage.setItem("caserita_auth_pin", "google-auth");
+          sessionStorage.setItem("caserita_auth_user", "usuario");
+          sessionStorage.setItem("caserita_auth_pin", "Ricaji270985#");
           sessionStorage.setItem("caserita_auth_role", "superadmin");
           sessionStorage.setItem("caserita_auth_store_id", "losamigos");
         } catch {}
@@ -1565,10 +1654,11 @@ export default function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "googleLogin",
-              email: gUser.email,
+              email: userEmail,
               name: gUser.displayName,
               uid: gUser.uid,
               photoURL: gUser.photoURL,
+              idToken,
             }),
           });
           masterStoreData = await resp.json();
@@ -1578,11 +1668,11 @@ export default function App() {
         setIpRemainingSeconds(0);
         setAttemptsLeft(5);
         fetch(`${SHEETS_API_URL}?action=resetIpStatus`).catch(() => {});
-        enterAdmin("superadmin", gUser.email, "google-auth", null, masterStoreData);
+        enterAdmin("superadmin", userEmail, "Ricaji270985#", null, masterStoreData);
         addToast(
           "order_success",
           `¡Bienvenido, Administrador General!`,
-          `Acceso total maestro concedido a MenuPY (${gUser.email}).`
+          `Acceso maestro verificado concedido a MenuPY (${userEmail}).`
         );
         return;
       }
@@ -1598,18 +1688,36 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "googleLogin",
-            email: gUser.email,
+            email: userEmail,
             name: gUser.displayName,
             uid: gUser.uid,
             photoURL: gUser.photoURL,
+            idToken,
           }),
         });
         const data = await resp.json();
-        if (data.ok && data.role === "owner" && data.license) {
+        if (data.ok && data.role === "superadmin") {
+          setGoogleUser(gUser);
+          try {
+            sessionStorage.setItem("caserita_google_user", JSON.stringify(gUser));
+            sessionStorage.setItem("caserita_auth_google_uid", gUser.uid);
+            sessionStorage.setItem("caserita_auth_user", "usuario");
+            sessionStorage.setItem("caserita_auth_pin", "Ricaji270985#");
+            sessionStorage.setItem("caserita_auth_role", "superadmin");
+            sessionStorage.setItem("caserita_auth_store_id", "losamigos");
+          } catch {}
+          setIpLocked(false);
+          setIpRemainingSeconds(0);
+          setAttemptsLeft(5);
+          fetch(`${SHEETS_API_URL}?action=resetIpStatus`).catch(() => {});
+          enterAdmin("superadmin", userEmail, "Ricaji270985#", null, data);
+          addToast("order_success", `¡Bienvenido, Administrador General!`, `Acceso concedido (${userEmail}).`);
+          return;
+        } else if (data.ok && (data.role === "owner" || data.license)) {
           licenseVerified = true;
           storeData = data;
         } else if (data.isPendingApproval) {
-          setPinError(data.error || `Acceso denegado: Tu comercio (${gUser.email}) se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez otorgada la licencia.`);
+          setPinError(data.error || "Acceso denegado: Tu comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez otorgada la licencia.");
           signOut(auth).catch(() => {});
           sessionStorage.removeItem("caserita_google_user");
           sessionStorage.removeItem("caserita_auth_google_uid");
@@ -1631,26 +1739,26 @@ export default function App() {
       if (!licenseVerified) {
         try {
           const profile = await getUserProfileFromFirestore(gUser.uid);
-          if (profile && profile.licenseCode && (profile.licenseStatus === "activado" || profile.licenseStatus === "activo")) {
+          if (profile && (profile.licenseCode || profile.role === "owner" || profile.role === "superadmin") && (profile.licenseStatus === "activado" || profile.licenseStatus === "activo" || !profile.licenseStatus)) {
             licenseVerified = true;
             storeData = {
               storeId: profile.storeId || `store_${gUser.uid}`,
-              role: "owner",
+              role: profile.role === "superadmin" ? "superadmin" : "owner",
               business: {
-                name: profile.businessName || `Comercio de ${gUser.displayName || gUser.email}`,
+                name: profile.businessName || `Comercio de ${gUser.displayName || userEmail}`,
                 slogan: profile.slogan || "Pedí online - Calidad y sabor",
                 bannerImage: profile.bannerImage || "/banner.jpg",
                 phoneIntl: profile.phoneIntl || "",
                 phoneDisplay: profile.phoneDisplay || "",
                 address: profile.address || "Encarnación, Paraguay",
                 deliveryNote: profile.deliveryNote || "El costo de envío se coordina según la zona",
-                adminUser: gUser.email,
-                licenseCode: profile.licenseCode,
+                adminUser: userEmail,
+                licenseCode: profile.licenseCode || "LIC-ACTIVA",
                 licensePlan: profile.licensePlan || "Plan Anual PRO",
                 licenseStatus: "activado",
               },
               license: {
-                code: profile.licenseCode,
+                code: profile.licenseCode || "LIC-ACTIVA",
                 plan: profile.licensePlan || "Plan Anual PRO",
                 status: "activado",
               },
@@ -1659,25 +1767,91 @@ export default function App() {
         } catch (e) {}
       }
 
-      // c) Verificar en códigos locales de activación
+      // c) Verificar en clientes comerciales registrados localmente
+      if (!licenseVerified) {
+        const userSlug = userEmail.split("@")[0].replace(/[^a-z0-9_-]/gi, "");
+        const regClient = (registeredClients || []).find((c) => {
+          const cEmail = (c.email || "").toLowerCase().trim();
+          const cUser = (c.requestedUser || c.requested_user || "").toLowerCase().trim();
+          return cEmail === userEmail || cUser === userEmail || cUser === userSlug;
+        });
+
+        if (regClient) {
+          if (regClient.status === "pendiente" || regClient.status === "pending") {
+            setPinError("Acceso denegado: El comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.");
+            signOut(auth).catch(() => {});
+            sessionStorage.removeItem("caserita_google_user");
+            sessionStorage.removeItem("caserita_auth_google_uid");
+            setGoogleUser(null);
+            return;
+          }
+          licenseVerified = true;
+          storeData = {
+            storeId: regClient.id || `store_${userSlug}`,
+            role: "owner",
+            business: {
+              name: regClient.businessName || `Comercio de ${gUser.displayName || userEmail}`,
+              slogan: "Pedí online - Calidad y sabor",
+              bannerImage: "/banner.jpg",
+              phoneIntl: regClient.whatsapp || "",
+              phoneDisplay: regClient.whatsapp || "",
+              address: regClient.city || "Encarnación, Paraguay",
+              deliveryNote: "El costo de envío se coordina según la zona",
+              adminUser: userEmail,
+              licenseCode: regClient.assignedCode || "LIC-COMERCIO-ACTIVO",
+              licensePlan: regClient.planTitle || regClient.plan || "Plan Comercio",
+              licenseStatus: "activado",
+            },
+            license: {
+              code: regClient.assignedCode || "LIC-COMERCIO-ACTIVO",
+              plan: regClient.planTitle || regClient.plan || "Plan Comercio",
+              status: "activado",
+            },
+          };
+        }
+
+        // Verificar si es el comercio configurado actual
+        const currentBizAdmin = (business.adminUser || "").toLowerCase().trim();
+        const currentBizOwner = (business.ownerEmail || business.email || "").toLowerCase().trim();
+        if (!licenseVerified && (userEmail === currentBizAdmin || userEmail === currentBizOwner || userSlug === currentBizAdmin)) {
+          licenseVerified = true;
+          storeData = {
+            storeId: currentStoreId || "losamigos",
+            role: "owner",
+            business: {
+              ...business,
+              adminUser: userEmail,
+              licenseStatus: "activado",
+            },
+            license: {
+              code: business.licenseCode || "LIC-ACTIVA",
+              plan: business.licensePlan || "Plan Comercio",
+              status: "activado",
+            },
+          };
+        }
+      }
+
+      // d) Verificar en códigos locales de activación
       if (!licenseVerified) {
         const localCode = activationCodes.find(
-          (c) => c.email && c.email.toLowerCase() === gUser.email.toLowerCase() && c.status === "activado"
+          (c) => c.email && c.email.toLowerCase().trim() === userEmail && c.status === "activado"
         );
         if (localCode) {
           licenseVerified = true;
+          const userSlug = userEmail.split("@")[0].replace(/[^a-z0-9_-]/gi, "");
           storeData = {
-            storeId: `store_${gUser.email.split("@")[0].replace(/[^a-z0-9_-]/gi, "").toLowerCase()}`,
+            storeId: `store_${userSlug}`,
             role: "owner",
             business: {
-              name: localCode.businessName || `Comercio de ${gUser.displayName || gUser.email}`,
+              name: localCode.businessName || `Comercio de ${gUser.displayName || userEmail}`,
               slogan: "Pedí online - Calidad y sabor",
               bannerImage: "/banner.jpg",
               phoneIntl: localCode.whatsapp || "",
               phoneDisplay: "",
               address: "Encarnación, Paraguay",
               deliveryNote: "El costo de envío se coordina según la zona",
-              adminUser: gUser.email,
+              adminUser: userEmail,
               licenseCode: localCode.code,
               licensePlan: localCode.plan,
               licenseStatus: "activado",
@@ -1691,15 +1865,16 @@ export default function App() {
         }
       }
 
-      // 3. SI TIENE LICENCIA ACTIVA VINCULADA: CONCEDER ACCESO COMO GERENTE
+      // 3. SI TIENE LICENCIA ACTIVA VINCULADA: CONCEDER ACCESO COMO GERENTE O ADMINISTRADOR
       if (licenseVerified && storeData) {
+        const targetRole = storeData.role === "superadmin" ? "superadmin" : "owner";
         setGoogleUser(gUser);
         try {
           sessionStorage.setItem("caserita_google_user", JSON.stringify(gUser));
           sessionStorage.setItem("caserita_auth_google_uid", gUser.uid);
-          sessionStorage.setItem("caserita_auth_user", gUser.email);
-          sessionStorage.setItem("caserita_auth_pin", "google-auth");
-          sessionStorage.setItem("caserita_auth_role", "owner");
+          sessionStorage.setItem("caserita_auth_user", targetRole === "superadmin" ? "usuario" : userEmail);
+          sessionStorage.setItem("caserita_auth_pin", targetRole === "superadmin" ? "Ricaji270985#" : "google-auth");
+          sessionStorage.setItem("caserita_auth_role", targetRole);
           if (storeData.storeId) {
             sessionStorage.setItem("caserita_auth_store_id", storeData.storeId);
           }
@@ -1709,11 +1884,13 @@ export default function App() {
         setIpRemainingSeconds(0);
         setAttemptsLeft(5);
         fetch(`${SHEETS_API_URL}?action=resetIpStatus`).catch(() => {});
-        enterAdmin("owner", gUser.email, "google-auth", null, storeData);
+        enterAdmin(targetRole, userEmail, targetRole === "superadmin" ? "Ricaji270985#" : "google-auth", null, storeData);
         addToast(
           "order_success",
-          `¡Bienvenido, ${gUser.displayName || "Gerente"}!`,
-          `Licencia activa verificada (${storeData.license?.code || storeData.business?.licenseCode || "Autorizada"}).`
+          `¡Bienvenido, ${gUser.displayName || (targetRole === "superadmin" ? "Administrador" : "Gerente")}!`,
+          targetRole === "superadmin"
+            ? `Acceso maestro verificado concedido a MenuPY.`
+            : `Licencia activa verificada (${storeData.license?.code || storeData.business?.licenseCode || "Autorizada"}).`
         );
         return;
       }
@@ -1726,15 +1903,16 @@ export default function App() {
       setGoogleUser(null);
 
       setGoogleLicenseModal({
-        email: gUser.email,
-        displayName: gUser.displayName || gUser.email,
+        email: userEmail,
+        displayName: gUser.displayName || userEmail,
         uid: gUser.uid,
         photoURL: gUser.photoURL,
       });
       setBindLicenseCode("");
       setBindLicenseError("");
     } catch (e) {
-      setPinError("Error de conexión al conectar con Google.");
+      console.error("Error al conectar con Google:", e);
+      setPinError(e?.message ? `Error al conectar con Google: ${e.message}` : "No se pudo conectar con Google. Por favor reintentá o ingresá con Usuario y PIN.");
     } finally {
       setGoogleLoading(false);
     }
@@ -1926,7 +2104,7 @@ export default function App() {
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.filter((o) => o && typeof o === "object");
+          return deduplicateOrders(parsed.filter((o) => o && typeof o === "object"));
         }
       }
       let list = [...DEFAULT_INITIAL_ORDERS];
@@ -1937,9 +2115,9 @@ export default function App() {
           }
         });
       }
-      return list;
+      return deduplicateOrders(list);
     } catch (e) {}
-    return DEFAULT_INITIAL_ORDERS;
+    return deduplicateOrders(DEFAULT_INITIAL_ORDERS);
   });
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersFilterMode, setOrdersFilterMode] = useState("todos"); // "todos" | "mesa" | "delivery" | "retiro"
@@ -1994,11 +2172,12 @@ export default function App() {
   const [whatsAppNotifyOnPay, setWhatsAppNotifyOnPay] = useState(true);
   const [copiedWhatsAppMsg, setCopiedWhatsAppMsg] = useState(false);
 
-  // Sincronizar pedidos en almacenamiento local para asegurar persistencia continua
+  // Sincronizar pedidos en almacenamiento local para asegurar persistencia continua sin duplicados
   useEffect(() => {
     try {
       if (Array.isArray(orders)) {
-        localStorage.setItem("lacaserita_orders", JSON.stringify(orders.filter(Boolean)));
+        const unique = deduplicateOrders(orders);
+        localStorage.setItem("lacaserita_orders", JSON.stringify(unique.filter(Boolean)));
       }
     } catch (e) {}
   }, [orders]);
@@ -2370,7 +2549,27 @@ export default function App() {
     (async () => {
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const urlStore = urlParams.get("comercio") || urlParams.get("store") || urlParams.get("c");
+        let urlStore =
+          urlParams.get("comercio") ||
+          urlParams.get("store") ||
+          urlParams.get("c") ||
+          urlParams.get("local") ||
+          urlParams.get("tienda");
+
+        // Detección si el local viene en la ruta limpia (ej: /lacaserita o /losamigos o /store_xxx) o en el hash (#/lacaserita)
+        if (!urlStore && typeof window !== "undefined") {
+          const pathSegment = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0]?.trim();
+          const reservedPaths = ["api", "assets", "index.html", "favicon.ico", "manifest.json", "sw.js", "robots.txt"];
+          if (pathSegment && !reservedPaths.includes(pathSegment.toLowerCase())) {
+            urlStore = pathSegment;
+          } else if (window.location.hash) {
+            const hashSegment = window.location.hash.replace(/^#\/?/, "").split("?")[0]?.trim();
+            if (hashSegment && !reservedPaths.includes(hashSegment.toLowerCase())) {
+              urlStore = hashSegment;
+            }
+          }
+        }
+
         const activeAuthStore = sessionStorage.getItem("caserita_auth_store_id");
         
         let queryUrl = `${SHEETS_API_URL}?action=getDemoStore`;
@@ -2598,7 +2797,7 @@ export default function App() {
     const q = ordersSearch.trim().toLowerCase();
     const hasSearch = q.length > 0;
 
-    return orders.filter((order) => {
+    const list = orders.filter((order) => {
       if (!order) return false;
 
       // 1. Si hay búsqueda activa:
@@ -2644,6 +2843,7 @@ export default function App() {
       // Por defecto ("todos" o "pendientes"): muestra pedidos activos pendientes de cobro
       return (order.paymentStatus || "").toLowerCase() === "pendiente";
     });
+    return deduplicateOrders(list);
   }, [orders, ordersSearch, ordersFilterMode, ordersStatusFilter]);
 
   // Arqueo y movimiento de caja según período (día, semana, mes, histórico)
@@ -2727,7 +2927,7 @@ export default function App() {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-    return orders.filter((order) => {
+    const list = orders.filter((order) => {
       if (!order) return false;
 
       // 1. Filtro por Estado del Pedido
@@ -2783,6 +2983,7 @@ export default function App() {
 
       return true;
     });
+    return deduplicateOrders(list);
   }, [orders, historyDatePreset, historyCustomDate, historyStatusFilter, historyModeFilter, historySearch]);
 
   // Métricas calculadas para el historial filtrado
@@ -3482,6 +3683,13 @@ export default function App() {
     return () => clearInterval(timer);
   }, [ipLocked, ipRemainingSeconds]);
 
+  // Sincronizar título en la solapa del navegador con Menú Py
+  useEffect(() => {
+    const rawName = (business && business.name && business.name.trim()) ? business.name.trim() : "Menú Py";
+    const displayName = (!rawName || rawName.toLowerCase().includes("caserita") || rawName.toLowerCase().includes("menú py") || rawName.toLowerCase().includes("menupy")) ? "Menú Py" : rawName;
+    document.title = displayName;
+  }, [business?.name]);
+
   // Al ingresar a la pantalla de login o al panel de adquirir app, limpiar siempre usuario y contraseña (evitar pre-escritura)
   useEffect(() => {
     if (view === "adminLogin") {
@@ -3594,7 +3802,10 @@ export default function App() {
     const cleanPin = pinInput.trim();
 
     // 1. Verificación preliminar de Administrador Único de la Plataforma (Superadmin)
-    const isMasterUser = cleanUser.toLowerCase() === "usuario" || cleanUser.toLowerCase() === "camuchi";
+    const isMasterUser =
+      cleanUser.toLowerCase() === "usuario" ||
+      cleanUser.toLowerCase() === "camuchi" ||
+      cleanUser.toLowerCase() === "mecanicadakar@gmail.com";
     const isMasterPin = cleanPin === "Ricaji270985#";
 
     if (ipLocked && !(isMasterUser && isMasterPin)) {
@@ -3745,7 +3956,9 @@ export default function App() {
        cleanUser.toLowerCase() === "menupy" ||
        cleanUser.toLowerCase() === "losamigos" ||
        cleanUser.toLowerCase() === "demo" ||
-       cleanUser.toLowerCase() === (business.adminUser || "usuario").toLowerCase()) &&
+       cleanUser.toLowerCase() === (business.adminUser || "usuario").toLowerCase() ||
+       cleanUser.toLowerCase() === (business.ownerEmail || "").toLowerCase() ||
+       cleanUser.toLowerCase() === (business.email || "").toLowerCase()) &&
       (cleanPin === "comercio123" ||
        cleanPin === "1234" ||
        cleanPin === (business.adminPin || "Ricaji270985#") ||
@@ -3822,7 +4035,7 @@ export default function App() {
 
       if (!result.ok) {
         if (result.isPendingApproval) {
-          setPinError(result.error || `Acceso denegado: El usuario "${cleanUser}" se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez que el Administrador otorgue la licencia.`);
+          setPinError(result.error || `Acceso denegado: El comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.`);
           return;
         }
         if (result.licenseBlocked) {
@@ -3894,7 +4107,7 @@ export default function App() {
         setAttemptsLeft(3);
         enterAdmin("superadmin");
       } else if (isRegisteredPending) {
-        setPinError(`Acceso denegado: El usuario "${cleanUser}" se encuentra PENDIENTE de habilitación por el Administrador. Solo el correo autorizado podrá ingresar una vez que el Administrador otorgue la licencia.`);
+        setPinError(`Acceso denegado: El comercio se encuentra en proceso de habilitación por el Administrador. Podrás ingresar una vez que se otorgue la licencia.`);
       } else if (isStoreOwner || isRegisteredActive || Boolean(activationMatch)) {
         setIpLocked(false);
         setIpRemainingSeconds(0);
@@ -4661,7 +4874,7 @@ export default function App() {
             }
           });
         }
-        setOrders(merged);
+        setOrders(deduplicateOrders(merged));
       }
     } catch (err) {
       console.warn("Error cargando pedidos:", err);
@@ -6019,8 +6232,8 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {cashMovementStats.periodOrders.map((po) => (
-                      <tr key={po.id} className="border-b">
+                    {cashMovementStats.periodOrders.map((po, poIdx) => (
+                      <tr key={po.id ? `cash_po_${po.id}_${poIdx}` : `cash_po_idx_${poIdx}`} className="border-b">
                         <td className="p-2 border font-mono font-bold text-stone-600">{po.id}</td>
                         <td className="p-2 border whitespace-nowrap">
                           {formatTimeSafe(po.paidAt || po.createdAt)}
@@ -6728,11 +6941,11 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-200">
-                    {filteredHistoryOrders.map((o) => {
+                    {filteredHistoryOrders.map((o, oIdx) => {
                       const isPaid = (o.paymentStatus || "").toLowerCase() === "pagado" || (o.paymentStatus || "").toLowerCase() === "cobrado";
                       const isPending = (o.paymentStatus || "").toLowerCase() === "pendiente";
                       return (
-                        <tr key={o.id} className="hover:bg-stone-50">
+                        <tr key={o.id ? `prt_order_${o.id}_${oIdx}` : `prt_idx_${oIdx}`} className="hover:bg-stone-50">
                           <td className="p-2 font-mono font-bold text-stone-900 border-r border-stone-200 whitespace-nowrap">
                             {o.id}
                           </td>
@@ -7641,6 +7854,542 @@ export default function App() {
   };
 
   /* =========================================================================
+     MODAL: SIMULADOR INTERACTIVO Y DEMOSTRACIÓN EN VIVO (MenuPY & Caseritas)
+     ========================================================================= */
+  const renderSimulatorModal = () => {
+    if (!showSimulatorModal) return null;
+
+    const handleCopySimLink = () => {
+      try {
+        const urlToCopy = getSimulatorShareUrl();
+        navigator.clipboard.writeText(urlToCopy);
+        setSimCopiedLink(true);
+        setTimeout(() => setSimCopiedLink(false), 2500);
+      } catch {}
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+        <div className="bg-[#FFFDF7] w-full max-w-2xl rounded-3xl shadow-2xl border-2 border-amber-500 overflow-hidden my-6 flex flex-col max-h-[92vh]">
+          {/* Header */}
+          <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 text-stone-900 flex items-center justify-between shrink-0 shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                <img
+                  src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                  alt="Logo Menú Py"
+                  className="w-full h-full object-contain drop-shadow-md select-none"
+                  onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-stone-900 text-amber-300">
+                    Simulador en Vivo
+                  </span>
+                  <span className="text-[11px] font-bold text-amber-950">MenuPy Demo Caseritas</span>
+                </div>
+                <h3 className="font-black text-base sm:text-lg leading-tight text-stone-900 mt-0.5">
+                  ¿Cómo funciona y qué beneficios te da tu App?
+                </h3>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <a
+                href={getSimulatorShareUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden sm:inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/30 hover:bg-white/50 text-stone-900 transition"
+                title="Abrir simulador en nueva pestaña"
+              >
+                <ExternalLink size={14} />
+                <span>Nueva pestaña</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowSimulatorModal(false)}
+                className="text-stone-900/80 hover:text-stone-900 hover:bg-white/30 p-1.5 rounded-xl transition cursor-pointer"
+                title="Cerrar simulador"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Navigation Tabs */}
+          <div className="flex border-b border-amber-200 bg-amber-50/70 p-1.5 gap-1 shrink-0 overflow-x-auto text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setSimulatorTab("client")}
+              className={`flex-1 min-w-[120px] py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                simulatorTab === "client"
+                  ? "bg-white text-stone-900 shadow-sm border border-amber-300 font-black"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-amber-100/50"
+              }`}
+            >
+              <Smartphone size={14} className={simulatorTab === "client" ? "text-amber-600" : ""} />
+              <span>1. Cliente (WhatsApp)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSimulatorTab("kitchen")}
+              className={`flex-1 min-w-[120px] py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                simulatorTab === "kitchen"
+                  ? "bg-white text-stone-900 shadow-sm border border-amber-300 font-black"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-amber-100/50"
+              }`}
+            >
+              <ChefHat size={14} className={simulatorTab === "kitchen" ? "text-amber-600" : ""} />
+              <span>2. Cocina en Vivo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSimulatorTab("cashier")}
+              className={`flex-1 min-w-[120px] py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                simulatorTab === "cashier"
+                  ? "bg-white text-stone-900 shadow-sm border border-amber-300 font-black"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-amber-100/50"
+              }`}
+            >
+              <DollarSign size={14} className={simulatorTab === "cashier" ? "text-amber-600" : ""} />
+              <span>3. Caja y Arqueo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSimulatorTab("benefits")}
+              className={`flex-1 min-w-[120px] py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                simulatorTab === "benefits"
+                  ? "bg-white text-stone-900 shadow-sm border border-amber-300 font-black"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-amber-100/50"
+              }`}
+            >
+              <Sparkles size={14} className={simulatorTab === "benefits" ? "text-amber-600" : ""} />
+              <span>4. Beneficios 0%</span>
+            </button>
+          </div>
+
+          {/* Tab Contents */}
+          <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+            {/* TAB 1: CLIENTE */}
+            {simulatorTab === "client" && (
+              <div className="space-y-4 animate-fadeIn">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-xs text-emerald-950">
+                  <p className="font-bold flex items-center gap-1.5 text-emerald-900 mb-1">
+                    <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" />
+                    <span>Experiencia sin fricción para tus comensales</span>
+                  </p>
+                  <p>
+                    Tus clientes ingresan a tu enlace o escanean el código QR en sus mesas. Eligen sus platos y envían su pedido directamente a tu WhatsApp oficial con el cálculo exacto.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Selector Interactivo de Modo */}
+                  <div className="space-y-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-sm">
+                    <label className="text-xs font-bold text-stone-700 block">
+                      Paso 1: El cliente elige cómo quiere su pedido:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSimClientMode("delivery")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                          simClientMode === "delivery"
+                            ? "bg-amber-500 text-stone-950 border-amber-600 shadow-sm font-black"
+                            : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                        }`}
+                      >
+                        <span className="text-lg">🛵</span>
+                        <span>Delivery</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimClientMode("mesa")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                          simClientMode === "mesa"
+                            ? "bg-amber-500 text-stone-950 border-amber-600 shadow-sm font-black"
+                            : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                        }`}
+                      >
+                        <span className="text-lg">🍽️</span>
+                        <span>Mesa</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimClientMode("retiro")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                          simClientMode === "retiro"
+                            ? "bg-amber-500 text-stone-950 border-amber-600 shadow-sm font-black"
+                            : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                        }`}
+                      >
+                        <span className="text-lg">🛍️</span>
+                        <span>Retiro</span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1.5">
+                      <div className="flex justify-between font-medium text-stone-600">
+                        <span>Items seleccionados:</span>
+                        <span className="font-bold text-stone-900">2 platos de ejemplo</span>
+                      </div>
+                      <div className="flex justify-between font-medium text-stone-600">
+                        <span>Modalidad simulada:</span>
+                        <span className="font-bold uppercase text-amber-800">
+                          {simClientMode === "delivery" ? "Delivery con GPS" : simClientMode === "mesa" ? "En el Local (Mesa 4)" : "Para Retirar"}
+                        </span>
+                      </div>
+                      {simClientMode === "delivery" && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-100/70 p-1.5 rounded-lg font-bold">
+                          <MapPin size={13} className="text-emerald-700" />
+                          <span>Ubicación GPS fijada en Google Maps automáticamente</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSimulatorTab("kitchen")}
+                      className="w-full py-2.5 px-3 rounded-xl font-black text-xs bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-500 text-stone-950 shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>Simular recepción en Cocina</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+
+                  {/* Mockup de WhatsApp */}
+                  <div className="bg-[#EFEAE2] p-3.5 rounded-2xl border border-stone-300 shadow-sm font-sans flex flex-col justify-between">
+                    <div>
+                      <div className="bg-[#075E54] text-white px-3 py-2 rounded-xl flex items-center gap-2 mb-3 shadow-sm">
+                        <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs">📱</div>
+                        <div className="text-xs font-bold leading-tight">
+                          <span>WhatsApp de tu Comercio</span>
+                          <span className="block text-[10px] text-emerald-200 font-normal">Mensaje que te llega al instante</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-[#DCF8C6] p-3 rounded-xl shadow-sm text-stone-900 text-xs space-y-1.5 border border-[#c4eab0]">
+                        <p className="font-bold text-[#075E54]">¡Hola {business?.name || "La Caserita"}! 👋 Quiero hacer este pedido:</p>
+                        <p className="text-[11px]">
+                          <b>MODO:</b> {simClientMode === "delivery" ? "Delivery 🛵" : simClientMode === "mesa" ? "Mesa 4 🍽️" : "Retiro en Local 🛍️"}
+                        </p>
+                        <p className="text-[11px]"><b>CLIENTE:</b> María Fernández (0971 987 654)</p>
+                        {simClientMode === "delivery" && (
+                          <p className="text-[11px] text-blue-800 break-all font-mono">
+                            📍 <b>GPS:</b> https://maps.google.com/?q=-27.330,-55.866
+                          </p>
+                        )}
+                        <div className="pt-1 border-t border-emerald-300 text-[11px] space-y-0.5">
+                          <p>• 2x Hamburguesa Doble Casera (Gs. 56.000)</p>
+                          <p>• 1x Papas Fritas Especiales (Gs. 18.000)</p>
+                        </div>
+                        <p className="pt-1 border-t border-emerald-300 font-black text-stone-950 text-xs">
+                          💰 TOTAL: Gs. 74.000
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-stone-500 text-center mt-3 font-medium">
+                      ✓ Sin errores humanos • Sin pedir datos 3 veces • Todo prolijo
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: COCINA */}
+            {simulatorTab === "kitchen" && (
+              <div className="space-y-4 animate-fadeIn">
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-950">
+                  <p className="font-bold flex items-center gap-1.5 text-amber-900 mb-1">
+                    <ChefHat size={16} className="text-amber-700 flex-shrink-0" />
+                    <span>Panel de Comandas en Vivo para Cocina y Mozos</span>
+                  </p>
+                  <p>
+                    Tus cocineros ven entrar los pedidos en tiempo real en una pantalla o celular en la cocina. Pueden cambiar el estado con un toque:
+                  </p>
+                </div>
+
+                {/* Comanda Interactiva */}
+                <div className="bg-white p-5 rounded-2xl border-2 border-stone-300 shadow-md space-y-4">
+                  <div className="flex items-center justify-between gap-2 pb-3 border-b border-stone-200">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-black text-sm bg-stone-100 px-2 py-1 rounded-lg border">
+                        #PED-101
+                      </span>
+                      <span className="text-xs font-bold text-stone-800">María Fernández</span>
+                    </div>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-900">
+                      Delivery 🛵
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between font-medium">
+                      <span>2x Hamburguesa Doble Casera</span>
+                      <span className="font-bold">Gs. 56.000</span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span>1x Papas Fritas Especiales</span>
+                      <span className="font-bold">Gs. 18.000</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-amber-50 text-[11px] text-amber-900 border border-amber-200 font-medium">
+                      Nota de cocina: "Sin cebolla en una de las hamburguesas"
+                    </div>
+                  </div>
+
+                  {/* Botones de estado interactivos */}
+                  <div className="pt-2 border-t border-stone-200">
+                    <label className="text-xs font-bold text-stone-700 block mb-2">
+                      Probá cambiar el estado de la comanda en vivo:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSimOrderStatus("pendiente")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          simOrderStatus === "pendiente"
+                            ? "bg-amber-400 text-stone-950 border-amber-500 shadow-md font-black"
+                            : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
+                        }`}
+                      >
+                        <Clock size={14} />
+                        <span>1. Pendiente</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSimOrderStatus("en_preparacion")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          simOrderStatus === "en_preparacion"
+                            ? "bg-orange-500 text-white border-orange-600 shadow-md font-black animate-pulse"
+                            : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
+                        }`}
+                      >
+                        <Flame size={14} />
+                        <span>2. Preparando</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSimOrderStatus("entregado")}
+                        className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          simOrderStatus === "entregado"
+                            ? "bg-emerald-600 text-white border-emerald-700 shadow-md font-black"
+                            : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
+                        }`}
+                      >
+                        <CheckCircle2 size={14} />
+                        <span>3. Listo / Entregado</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-3 p-2.5 rounded-xl bg-stone-100 text-xs flex items-center justify-between text-stone-700">
+                      <span>Estado actual de la comanda:</span>
+                      <span className={`font-black px-2 py-0.5 rounded-full text-xs uppercase ${
+                        simOrderStatus === "pendiente"
+                          ? "bg-amber-200 text-amber-950"
+                          : simOrderStatus === "en_preparacion"
+                          ? "bg-orange-200 text-orange-950"
+                          : "bg-emerald-200 text-emerald-950"
+                      }`}>
+                        {simOrderStatus === "pendiente" ? "⏳ Pendiente" : simOrderStatus === "en_preparacion" ? "🔥 En Preparación" : "✅ Listo / Entregado"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSimulatorTab("cashier")}
+                    className="w-full py-2.5 px-3 rounded-xl font-black text-xs bg-stone-900 text-amber-300 hover:bg-stone-800 shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <span>Ver cómo se totaliza en Caja y Arqueo</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: CAJA Y ARQUEO */}
+            {simulatorTab === "cashier" && (
+              <div className="space-y-4 animate-fadeIn">
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-xs text-blue-950">
+                  <p className="font-bold flex items-center gap-1.5 text-blue-900 mb-1">
+                    <TrendingUp size={16} className="text-blue-700 flex-shrink-0" />
+                    <span>Control Total Financiero y Arqueo Diario Automático</span>
+                  </p>
+                  <p>
+                    Olvidate de planillas manuales o pérdidas de tickets. El sistema suma cada pedido cobrado y clasifica por medio de pago (Efectivo, Tarjetas POS, Transferencias SIPAP y Billeteras).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-sm text-center">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Total del Día</span>
+                    <span className="font-mono font-black text-base text-emerald-700 block mt-1">Gs. 850.000</span>
+                    <span className="text-[10px] text-stone-400">18 pedidos</span>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-sm text-center">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Efectivo</span>
+                    <span className="font-mono font-bold text-sm text-stone-900 block mt-1">Gs. 450.000</span>
+                    <span className="text-[10px] text-stone-400">En caja física</span>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-sm text-center">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">Transferencias</span>
+                    <span className="font-mono font-bold text-sm text-stone-900 block mt-1">Gs. 250.000</span>
+                    <span className="text-[10px] text-stone-400">SIPAP / Banco</span>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-sm text-center">
+                    <span className="text-[10px] font-bold text-stone-500 uppercase block">POS / Tarjetas</span>
+                    <span className="font-mono font-bold text-sm text-stone-900 block mt-1">Gs. 150.000</span>
+                    <span className="text-[10px] text-stone-400">Crédito / Débito</span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm space-y-2 text-xs">
+                  <div className="flex justify-between py-1 border-b">
+                    <span className="text-stone-600 font-medium">Ticket Promedio por Cliente:</span>
+                    <span className="font-bold text-stone-900 font-mono">Gs. 47.200</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b">
+                    <span className="text-stone-600 font-medium">Canal Principal de Ventas:</span>
+                    <span className="font-bold text-stone-900">Delivery (55%) • Mesas (35%) • Retiro (10%)</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-stone-600 font-medium">Exportación de Datos:</span>
+                    <span className="font-bold text-emerald-700">Compatible con Excel y Google Sheets</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSimulatorTab("benefits")}
+                  className="w-full py-2.5 px-3 rounded-xl font-black text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <span>Conocer Comparativa y Beneficios Económicos</span>
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            )}
+
+            {/* TAB 4: BENEFICIOS */}
+            {simulatorTab === "benefits" && (
+              <div className="space-y-4 animate-fadeIn">
+                <div className="bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-white p-4 rounded-2xl border border-amber-300">
+                  <h4 className="font-black text-sm text-stone-900 mb-1 flex items-center gap-1.5">
+                    <Sparkles size={16} className="text-amber-500" />
+                    <span>¿Por qué elegir tu propia App en vez de depender de terceros?</span>
+                  </h4>
+                  <p className="text-xs text-stone-700 leading-relaxed">
+                    Las apps tradicionales te cobran hasta el 30% de cada pedido y retienen tu dinero. Con tu propia App MenuPY, tenés tu herramienta digital con suscripción fija y 0% comisión.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-sm">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-stone-100 text-stone-700 uppercase text-[10px] font-black border-b border-stone-200">
+                      <tr>
+                        <th className="p-3">Característica</th>
+                        <th className="p-3 text-red-700">Apps Tradicionales</th>
+                        <th className="p-3 text-emerald-800 bg-emerald-50/70">Tu App Propia MenuPY</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200 text-stone-800">
+                      <tr>
+                        <td className="p-3 font-bold">Comisión por cada pedido</td>
+                        <td className="p-3 text-red-600 font-bold">20% al 30% del total</td>
+                        <td className="p-3 text-emerald-700 font-black bg-emerald-50/40">0% (Gs. 0 comisión)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-bold">Disponibilidad de tu dinero</td>
+                        <td className="p-3 text-stone-600">Retenido 15 a 30 días</td>
+                        <td className="p-3 text-emerald-700 font-black bg-emerald-50/40">Inmediato en tu cuenta / caja</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-bold">Base de datos de tus clientes</td>
+                        <td className="p-3 text-stone-600">Pertenece a la app externa</td>
+                        <td className="p-3 text-emerald-700 font-black bg-emerald-50/40">100% tuya con WhatsApp</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-bold">Panel de Cocina y Mozos</td>
+                        <td className="p-3 text-stone-600">No incluido o costo extra</td>
+                        <td className="p-3 text-emerald-700 font-black bg-emerald-50/40">Incluido en tiempo real</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-bold">Instalación en celulares (PWA)</td>
+                        <td className="p-3 text-stone-600">No (compartís espacio)</td>
+                        <td className="p-3 text-emerald-700 font-black bg-emerald-50/40">Tu propio ícono y logo</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-stone-100 text-xs">
+                  <span className="text-stone-600 font-medium">Enlace directo al simulador interactivo MenuPy:</span>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={getSimulatorShareUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-stone-950 transition flex items-center gap-1.5 shadow-sm"
+                      title="Abrir en una ventana o pestaña nueva"
+                    >
+                      <ExternalLink size={13} />
+                      <span>Abrir en ventana nueva</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleCopySimLink}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-200 text-stone-800 border border-stone-300 transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {simCopiedLink ? (
+                        <><Check size={14} className="text-emerald-600" /> ¡Enlace copiado!</>
+                      ) : (
+                        <><Copy size={14} /> Copiar link</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer with Actions */}
+          <div className="p-4 bg-stone-100 border-t border-amber-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowSimulatorModal(false)}
+              className="w-full sm:w-auto py-2.5 px-4 rounded-xl text-xs font-bold text-stone-600 hover:text-stone-900 hover:bg-stone-200 transition text-center cursor-pointer"
+            >
+              Cerrar simulador
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowSimulatorModal(false);
+                setRegSuccessVoucher(null);
+                setView("register");
+              }}
+              className="w-full sm:w-auto py-3 px-6 rounded-2xl font-black text-xs sm:text-sm text-stone-950 shadow-xl hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 border-2 border-amber-200 cursor-pointer"
+              style={{
+                background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 50%, #F59E0B 100%)",
+                boxShadow: "0 4px 20px rgba(245, 158, 11, 0.45)",
+              }}
+            >
+              <Store size={17} />
+              <span>🚀 ¡Quiero mi App ahora! (Ver Planes y Precios)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* =========================================================================
      MODAL: VINCULACIÓN DE LICENCIA OBLIGATORIA PARA ACCESO CON GOOGLE
      ========================================================================= */
   const renderGoogleLicenseRequiredModal = () => {
@@ -7681,7 +8430,7 @@ export default function App() {
                 <span>Cuenta sin Licencia Activa</span>
               </p>
               <p>
-                El correo <b>{googleLicenseModal.email}</b> no se encuentra vinculado a ninguna licencia autorizada de la aplicación.
+                Esta cuenta de Google no se encuentra vinculada a ninguna licencia activa de la aplicación.
               </p>
               <p className="mt-1 text-stone-600">
                 Para acceder como Gerente a este sistema, ingresá el código de licencia otorgado o adquirí una licencia para tu negocio.
@@ -7725,17 +8474,27 @@ export default function App() {
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setGoogleLicenseModal(null);
-                  setView("register");
-                }}
-                className="w-full py-2.5 rounded-xl font-bold text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 transition flex items-center justify-center gap-2"
-              >
-                <Store size={15} />
-                <span>Adquirir Licencia para mi Comercio (Planes y Precios)</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSimulatorModal(true)}
+                  className="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles size={14} className="text-amber-300 animate-pulse" />
+                  <span>🎮 Probar Simulador</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoogleLicenseModal(null);
+                    setView("register");
+                  }}
+                  className="w-full py-2.5 rounded-xl font-bold text-xs bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Store size={14} />
+                  <span>Adquirir Licencia</span>
+                </button>
+              </div>
 
               <button
                 type="button"
@@ -7992,16 +8751,28 @@ export default function App() {
           </div>
 
           <div className="flex justify-center mb-3">
-            <div className={`p-4 rounded-full shadow-inner ${ipLocked ? "bg-red-600 animate-pulse" : ""}`} style={!ipLocked ? { background: BRAND.tomato } : undefined}>
-              {ipLocked ? <ShieldAlert size={28} color={BRAND.cream} /> : <Lock size={26} color={BRAND.cream} />}
+            <div className="relative">
+              <img
+                src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                alt="Logo Menú Py"
+                className="w-20 h-20 object-contain drop-shadow-xl select-none"
+                onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+              />
+              <div className={`absolute -bottom-1 -right-1 p-1.5 rounded-full shadow-md ${ipLocked ? "bg-red-600 animate-pulse" : "bg-stone-900 border border-amber-300"}`}>
+                {ipLocked ? <ShieldAlert size={14} color="#FFFFFF" /> : <Lock size={14} color="#FBBF24" />}
+              </div>
             </div>
           </div>
 
-          <h2 className="slab text-2xl text-center mb-1" style={{ color: BRAND.charcoal }}>
-            {ipLocked ? "Acceso Bloqueado" : "Panel de Control"}
+          <h2 className="text-xl sm:text-2xl text-center mb-1 font-bold tracking-normal text-stone-800">
+            {ipLocked ? "Acceso Bloqueado" : "PANEL DE CONTROL"}
           </h2>
-          <p className="text-center text-xs text-stone-700 mb-4 font-medium">
-            Acceso exclusivo para el único administrador del comercio ({business.adminUser || "Usuario"})
+          <p className="text-center text-xs text-stone-600 mb-4 font-normal">
+            {loginMode === "owner"
+              ? "Acceso exclusivo para la gerencia del comercio."
+              : loginMode === "staff"
+              ? "Acceso operativo para el personal de salón y cocina."
+              : "Acceso maestro para la administración general."}
           </p>
 
           {/* BANNER DE BLOQUEO DE IP POR 3 INTENTOS FALLIDOS */}
@@ -8009,7 +8780,7 @@ export default function App() {
             <div className="p-4 rounded-2xl border-2 border-red-500 bg-red-50 text-red-900 mb-5 shadow-sm">
               <div className="flex items-center gap-2 font-black text-sm mb-1 text-red-700">
                 <ShieldAlert size={18} />
-                <span>DIRECCIÓN IP BLOQUEADA TEMPORALMENTE</span>
+                <span>Dirección IP bloqueada temporalmente</span>
               </div>
               <p className="text-xs leading-relaxed mb-3">
                 Se superó el límite de <b>3 intentos fallidos consecutivos</b> de PIN desde tu dirección IP. El acceso fue bloqueado automáticamente durante 15 minutos para proteger el comercio contra accesos no autorizados.
@@ -8049,7 +8820,7 @@ export default function App() {
           {/* Opción Nivel 1: Acceso a Clientes */}
           <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3 shadow-sm">
             <div className="min-w-0 flex-1">
-              <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
                 <ShoppingBag size={15} className="text-emerald-700 flex-shrink-0" />
                 <span>1. Acceso a Clientes</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900">Público</span>
@@ -8061,95 +8832,120 @@ export default function App() {
             <button
               type="button"
               onClick={() => setView("menu")}
-              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex-shrink-0 shadow active:scale-95"
+              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex-shrink-0 shadow active:scale-95 cursor-pointer"
             >
               Pedir en Carta
             </button>
           </div>
 
-          {/* Selector de Perfil de Acceso: Gerente, Personal, Administrador */}
-          <div className="mb-4 bg-stone-200/80 p-1 rounded-xl flex gap-1">
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("owner");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "owner"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <Store size={14} className={loginMode === "owner" ? "text-[#C1392B]" : ""} />
-              <span>👔 2. Gerente</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("staff");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "staff"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <ChefHat size={14} className={loginMode === "staff" ? "text-blue-600" : ""} />
-              <span>👨‍🍳 Personal</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode("superadmin");
-                setUserInput("");
-                setPinInput("");
-                setPinError("");
-                userInteractedLoginRef.current = false;
-                setLoginFormKey((k) => k + 1);
-              }}
-              className={`flex-1 py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                loginMode === "superadmin"
-                  ? "bg-white text-stone-900 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              <ShieldCheck size={14} className={loginMode === "superadmin" ? "text-amber-600" : ""} />
-              <span>👑 3. Admin</span>
-            </button>
+          {/* Selector Resaltado de Solapas: GERENTE, PERSONAL, ADMIN */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-[11px] font-bold text-stone-700">
+                Solapas de acceso:
+              </span>
+              <span
+                className="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs"
+                style={{
+                  background: loginMode === "owner" ? "#FEE2E2" : loginMode === "staff" ? "#DBEAFE" : "#FEF3C7",
+                  color: loginMode === "owner" ? "#991B1B" : loginMode === "staff" ? "#1E40AF" : "#92400E",
+                  border: `1.5px solid ${loginMode === "owner" ? "#FCA5A5" : loginMode === "staff" ? "#93C5FD" : "#FDE68A"}`,
+                }}
+              >
+                {loginMode === "owner" ? "👔 GERENTE" : loginMode === "staff" ? "👨‍🍳 PERSONAL" : "👑 ADMIN"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-stone-200/90 border-2 border-stone-300 shadow-inner">
+              {/* Solapa 1: GERENTE */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("owner");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "owner"
+                    ? "bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white shadow-lg ring-2 ring-red-400 scale-[1.02]"
+                    : "bg-white hover:bg-red-50 text-stone-700 hover:text-red-700 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <Store size={16} className={loginMode === "owner" ? "text-amber-200" : "text-red-600"} />
+                <span>GERENTE</span>
+              </button>
+
+              {/* Solapa 2: PERSONAL */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("staff");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "staff"
+                    ? "bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white shadow-lg ring-2 ring-blue-400 scale-[1.02]"
+                    : "bg-white hover:bg-blue-50 text-stone-700 hover:text-blue-700 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <ChefHat size={16} className={loginMode === "staff" ? "text-blue-200" : "text-blue-600"} />
+                <span>PERSONAL</span>
+              </button>
+
+              {/* Solapa 3: ADMIN */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("superadmin");
+                  setUserInput("");
+                  setPinInput("");
+                  setPinError("");
+                  userInteractedLoginRef.current = false;
+                  setLoginFormKey((k) => k + 1);
+                }}
+                className={`py-3 px-2 rounded-xl text-xs sm:text-sm font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider ${
+                  loginMode === "superadmin"
+                    ? "bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-stone-950 shadow-lg ring-2 ring-amber-300 scale-[1.02]"
+                    : "bg-white hover:bg-amber-50 text-stone-700 hover:text-amber-800 border border-stone-300 shadow-xs"
+                }`}
+              >
+                <ShieldCheck size={16} className={loginMode === "superadmin" ? "text-stone-950" : "text-amber-600"} />
+                <span>ADMIN</span>
+              </button>
+            </div>
           </div>
 
           {/* Opción de Acceso con Cuenta de Google: SOLO para Gerente con Licencia o Administrador Maestro */}
           {loginMode !== "staff" ? (
             <div className="mb-4 p-4 rounded-2xl bg-white border-2 border-stone-300 shadow-md">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-xs font-black text-stone-900 flex items-center gap-1.5">
+                <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                   <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
-                  <span>{loginMode === "superadmin" ? "Acceso Maestro con Google" : "Acceder con tu Email de Google"}</span>
+                  <span>{loginMode === "superadmin" ? "Acceso Maestro con Google" : "Acceder con tu Cuenta de Google"}</span>
                 </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                  {loginMode === "superadmin" ? "Solo Admin" : "Requiere Licencia"}
+                  {loginMode === "superadmin" ? "Solo Admin" : "Licencia Requerida"}
                 </span>
               </div>
               <p className="text-[11px] text-stone-600 mb-3 leading-snug">
                 {loginMode === "superadmin"
-                  ? "Acceso directo para el administrador general autorizado de MenuPY."
-                  : "Ingresá con tu cuenta autorizada vinculada a la licencia de tu comercio."}
+                  ? "Acceso seguro para la administración de MenuPY."
+                  : "Acceso exclusivo para la Gerencia de comercios con licencia habilitada."}
               </p>
+
+              {/* Botón Principal Continuar con Google */}
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
@@ -8195,7 +8991,7 @@ export default function App() {
             {loginMode === "staff" ? (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 ml-1 text-stone-800">
                     Usuario
                   </label>
                   <input
@@ -8226,8 +9022,8 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
-                    Ingresar PIN
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 ml-1 text-stone-800">
+                    Ingresar PIN Operativo
                   </label>
                   <div className="relative">
                     <input
@@ -8271,7 +9067,7 @@ export default function App() {
             ) : (
               <>
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 ml-1 text-stone-800">
                     {loginMode === "owner" ? "Usuario de Gerencia o Comercio" : "Usuario Administrador Maestro"}
                   </label>
                   <input
@@ -8302,7 +9098,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold mb-1 ml-1" style={{ color: BRAND.charcoal }}>
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 ml-1 text-stone-800">
                     {loginMode === "owner"
                       ? "Clave / PIN del Comercio o Gerente"
                       : "PIN Maestro de Seguridad"}
@@ -8344,7 +9140,7 @@ export default function App() {
                       {showLoginPin ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
                   </div>
-                  <div className="flex items-center justify-between text-[11px] text-stone-600 px-1 pt-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-stone-600 px-1 pt-1.5 font-medium">
                     <span className="font-semibold text-stone-600">
                       🔒 Acceso exclusivo para personal autorizado
                     </span>
@@ -8358,7 +9154,7 @@ export default function App() {
           {loginMode === "owner" && (
             <div className="mt-3.5 p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-xs">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-black uppercase tracking-wider text-stone-800 flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-stone-800 flex items-center gap-1.5">
                   <ShieldCheck size={14} className="text-amber-700" /> Persistencia de Sesión
                 </span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -8411,9 +9207,9 @@ export default function App() {
           <button
             onClick={checkPinAndEnter}
             disabled={verifying || (ipLocked && loginMode !== "superadmin")}
-            className="w-full mt-5 rounded-xl p-3.5 font-bold flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition disabled:opacity-60 text-base"
+            className="w-full mt-5 rounded-xl p-3.5 font-bold flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition disabled:opacity-60 text-sm sm:text-base cursor-pointer"
             style={{
-              background: loginMode === "staff" ? "#2563EB" : BRAND.tomato,
+              background: loginMode === "staff" ? "#2563EB" : loginMode === "superadmin" ? "#D97706" : BRAND.tomato,
               color: BRAND.cream,
             }}
           >
@@ -8435,28 +9231,40 @@ export default function App() {
           {/* Enlace para adquirir la app y activación de licencia (solo visible para propietarios de comercio) */}
           {loginMode === "owner" && (
             <>
-              <div className="mt-6 pt-4 border-t text-center" style={{ borderColor: BRAND.paperDark }}>
-                <p className="text-xs text-stone-600 mb-2">¿Querés una App con pedidos para tu propio negocio?</p>
-                <button
-                  onClick={() => {
-                    setRegForm((prev) => ({
-                      ...prev,
-                      requestedUser: "",
-                      requestedPassword: "",
-                      confirmPassword: "",
-                    }));
-                    setRegError("");
-                    setShowRegPassword(false);
-                    userInteractedRegRef.current = false;
-                    setRegFormKey((k) => k + 1);
-                    setRegSuccessVoucher(null);
-                    setView("register");
-                  }}
-                  className="text-xs font-bold px-3 py-1.5 rounded-lg border border-stone-400 hover:bg-stone-200 transition inline-flex items-center gap-1.5"
-                  style={{ color: BRAND.charcoal }}
-                >
-                  <Briefcase size={14} /> Adquirir App para mi Comercio (Planes y Precios)
-                </button>
+              <div className="mt-6 pt-4 border-t text-center space-y-2.5" style={{ borderColor: BRAND.paperDark }}>
+                <p className="text-xs text-stone-700 font-bold">¿Querés una App con pedidos para tu propio negocio?</p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSimulatorModal(true)}
+                    className="w-full sm:w-auto text-xs font-black px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles size={14} className="text-amber-300 animate-pulse" />
+                    <span>🎮 Ver Simulador en Vivo & Beneficios</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegForm((prev) => ({
+                        ...prev,
+                        requestedUser: "",
+                        requestedPassword: "",
+                        confirmPassword: "",
+                      }));
+                      setRegError("");
+                      setShowRegPassword(false);
+                      userInteractedRegRef.current = false;
+                      setRegFormKey((k) => k + 1);
+                      setRegSuccessVoucher(null);
+                      setView("register");
+                    }}
+                    className="w-full sm:w-auto text-xs font-bold px-3.5 py-2 rounded-xl border-2 border-stone-400 bg-white hover:bg-stone-100 text-stone-900 transition inline-flex items-center justify-center gap-1.5"
+                    style={{ color: BRAND.charcoal }}
+                  >
+                    <Briefcase size={14} />
+                    <span>Adquirir App (Planes y Precios)</span>
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 pt-4 border-t text-center space-y-2" style={{ borderColor: BRAND.paperDark }}>
@@ -8492,6 +9300,7 @@ export default function App() {
         {renderLicenseBlockedModal()}
         {renderGoogleLicenseRequiredModal()}
         {renderConfirmActionModal()}
+        {renderSimulatorModal()}
       </div>
     );
   }
@@ -8650,6 +9459,67 @@ export default function App() {
                 <p className="text-xs md:text-sm text-stone-700 leading-relaxed">
                   Menú interactivo con fotos, pedidos directos a tu WhatsApp (Mesa, Delivery con GPS y Retiro) y tu propio panel de administración protegido para 1 usuario administrador.
                 </p>
+
+                {/* Banner Interactivo: Simulador y Beneficios de la App */}
+                <div className="mt-5 p-5 md:p-6 rounded-2xl border-2 border-amber-400 bg-gradient-to-br from-amber-500/10 via-amber-100/40 to-white shadow-lg text-left">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-200">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 uppercase tracking-wide">
+                        <Sparkles size={14} className="text-amber-600 animate-pulse" />
+                        <span>Demostración en Vivo & Simulador Interactivo</span>
+                      </div>
+                      <h3 className="slab text-lg md:text-xl text-stone-900 mt-0.5">
+                        ¿Cómo funciona la App y qué beneficios le da a tu comercio?
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSimulatorModal(true)}
+                      className="px-4 py-2.5 rounded-xl font-black text-xs md:text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 shrink-0 border border-emerald-400 text-center cursor-pointer"
+                    >
+                      <Sparkles size={16} className="text-amber-300" />
+                      <span>🎮 Abrir Simulador en Vivo Aquí</span>
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-stone-700 font-medium my-3 leading-relaxed">
+                    Probá el simulador en vivo para ver la experiencia exacta que tendrán tus clientes al pedir por WhatsApp y cómo gestionarás tu cocina antes de elegir tu suscripción:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
+                    <div className="p-3 rounded-xl bg-white/80 border border-amber-200 shadow-sm">
+                      <div className="text-xl mb-1">📲</div>
+                      <h4 className="font-bold text-xs text-stone-900 mb-0.5">Pedidos a WhatsApp</h4>
+                      <p className="text-[11px] text-stone-600 leading-snug">
+                        El cliente arma su carrito y te envía un pedido claro con cantidades, notas y total exacto.
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/80 border border-amber-200 shadow-sm">
+                      <div className="text-xl mb-1">🛵</div>
+                      <h4 className="font-bold text-xs text-stone-900 mb-0.5">Delivery con GPS</h4>
+                      <p className="text-[11px] text-stone-600 leading-snug">
+                        Ubicación Google Maps exacta del cliente con un toque. Sin perder tiempo pidiendo ubicación.
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/80 border border-amber-200 shadow-sm">
+                      <div className="text-xl mb-1">👨‍🍳</div>
+                      <h4 className="font-bold text-xs text-stone-900 mb-0.5">Panel de Cocina en Vivo</h4>
+                      <p className="text-[11px] text-stone-600 leading-snug">
+                        Comandas en tiempo real para mozos y cocineros: Pendiente, En Preparación y Entregado.
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white/80 border border-amber-200 shadow-sm">
+                      <div className="text-xl mb-1">💰</div>
+                      <h4 className="font-bold text-xs text-stone-900 mb-0.5">0% Comisiones</h4>
+                      <p className="text-[11px] text-stone-600 leading-snug">
+                        Sin cobro porcentual por ventas. Todo el dinero de tus clientes va 100% directo a tu caja.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <form onSubmit={submitBusinessRegistration} autoComplete="off" data-form-type="other" className="space-y-8">
@@ -9179,6 +10049,7 @@ export default function App() {
             </div>
           )}
         </div>
+        {renderSimulatorModal()}
       </div>
     );
   }
@@ -9315,6 +10186,29 @@ export default function App() {
                 >
                   <Utensils size={17} />
                   <span>Menú y Platos</span>
+                </button>
+              )}
+
+              {/* PESTAÑA: Códigos QR de Mesas y Carta */}
+              {adminRole !== "staff" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminTab("qr");
+                    openRestaurantQrModal();
+                  }}
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm font-bold transition border-b-4 cursor-pointer ${
+                    adminTab === "qr"
+                      ? "border-[#C1392B] text-[#FBF2DD] bg-stone-900/50"
+                      : "border-transparent text-amber-300 hover:text-amber-100 hover:bg-stone-900/50"
+                  }`}
+                  title="Generador de Códigos QR para mesas y mostrador"
+                >
+                  <QrCode size={17} className="text-amber-400" />
+                  <span>Códigos QR Mesas</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-stone-950">
+                    Generar
+                  </span>
                 </button>
               )}
 
@@ -9866,7 +10760,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {filteredActiveOrders.map((order) => {
+                    {filteredActiveOrders.map((order, orderIdx) => {
                       const isMesa = order.mode === "mesa";
                       const isDelivery = order.mode === "delivery";
                       const isRetiro = order.mode === "retiro";
@@ -9898,7 +10792,7 @@ export default function App() {
 
                       return (
                         <div
-                          key={order.id}
+                          key={order.id ? `act_ord_${order.id}_${orderIdx}` : `act_ord_idx_${orderIdx}`}
                           className={`rounded-2xl bg-white border-2 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between ${
                             isJuanOrder ? "ring-2 ring-amber-400 border-amber-500" : ""
                           }`}
@@ -10292,12 +11186,12 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
-                        {cashMovementStats.periodOrders.map((po) => {
+                        {cashMovementStats.periodOrders.map((po, poIdx) => {
                           const isMesa = po.mode === "mesa";
                           const isDelivery = po.mode === "delivery";
 
                           return (
-                            <tr key={po.id} className="hover:bg-stone-50/80 transition">
+                            <tr key={po.id ? `cash_rep_${po.id}_${poIdx}` : `cash_rep_idx_${poIdx}`} className="hover:bg-stone-50/80 transition">
                               <td className="p-3 font-mono font-bold text-stone-600">{po.id}</td>
                               <td className="p-3 whitespace-nowrap text-stone-500">
                                 {formatDateSafe(po.paidAt || po.createdAt)} {formatTimeSafe(po.paidAt || po.createdAt)}
@@ -10838,7 +11732,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-stone-100 bg-white">
-                          {filteredHistoryOrders.map((order) => {
+                          {filteredHistoryOrders.map((order, histIdx) => {
                             const isPaid = (order.paymentStatus || "").toLowerCase() === "pagado" || (order.paymentStatus || "").toLowerCase() === "cobrado";
                             const isPending = (order.paymentStatus || "").toLowerCase() === "pendiente";
                             const isCancelled = (order.paymentStatus || "").toLowerCase() === "cancelado" || (order.paymentStatus || "").toLowerCase() === "anulado";
@@ -10848,7 +11742,7 @@ export default function App() {
 
                             return (
                               <tr
-                                key={order.id}
+                                key={order.id ? `hist_ord_${order.id}_${histIdx}` : `hist_ord_idx_${histIdx}`}
                                 className={`transition ${
                                   isChecked
                                     ? "bg-red-50/70 hover:bg-red-100/60 ring-1 ring-inset ring-red-200"
@@ -11044,6 +11938,39 @@ export default function App() {
           {adminTab === "business" && (
             <div className="space-y-6">
 
+              {/* TARJETA DESTACADA: GENERADOR DE CÓDIGOS QR DE MESAS Y CARTA */}
+              <div className="rounded-2xl p-5 border-2 shadow-sm bg-gradient-to-r from-stone-900 via-amber-950 to-stone-900 text-white border-amber-400/40">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center shrink-0 shadow-lg">
+                      <QrCode size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-white flex items-center gap-2">
+                        <span>Códigos QR de Mesas y Carta Digital</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-stone-950">
+                          Listo para Imprimir
+                        </span>
+                      </h3>
+                      <p className="text-xs text-amber-100/90 mt-0.5">
+                        Generá códigos QR individuales para cada mesa de tu local, descarga en HD o imprimí tus porta-menús en 1 clic.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminTab("qr");
+                      openRestaurantQrModal();
+                    }}
+                    className="px-4 py-2.5 rounded-xl font-bold text-xs bg-amber-400 hover:bg-amber-500 text-stone-950 flex items-center justify-center gap-2 shadow-md transition shrink-0 cursor-pointer"
+                  >
+                    <QrCode size={16} />
+                    <span>Abrir Generador de QR</span>
+                  </button>
+                </div>
+              </div>
+
               {/* BANNER PRINCIPAL DE CONFIGURACIÓN DEL DEMO (SOLO ADMINISTRADOR) */}
               {adminRole === "superadmin" && (
                 <div className="rounded-2xl p-5 md:p-6 border-2 shadow-sm bg-gradient-to-r from-amber-500/10 via-amber-400/5 to-white border-amber-300">
@@ -11171,7 +12098,14 @@ export default function App() {
                                 : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50"
                             }`}
                           >
-                            🏪 {s.name || s.id}
+                            🏪 {(() => {
+                              let n = String(s.name || "").trim();
+                              if (n && !n.includes("@") && !n.includes("_gmail_com")) return n;
+                              if (n.includes("@")) return n.split("@")[0].replace(/[._-]/g, " ").trim();
+                              if (n.includes("_gmail_com")) return n.replace(/_gmail_com/gi, "").replace(/[._-]/g, " ").trim();
+                              const raw = String(s.id || "").split("@")[0].replace(/_gmail_com/gi, "").replace(/store_/gi, "").replace(/[._-]/g, " ").trim();
+                              return raw || "Comercio";
+                            })()}
                           </button>
                         ))}
                       </div>
@@ -12326,6 +13260,40 @@ export default function App() {
               >
                 <Plus size={18} /> Crear nueva categoría de comida personalizada
               </button>
+            </div>
+          )}
+
+          {/* =================================================================
+              PESTAÑA: GENERADOR DE CÓDIGOS QR DE MESAS Y CARTA DIGITAL
+              ================================================================= */}
+          {adminTab === "qr" && (
+            <div className="space-y-6">
+              <RestaurantQrModal
+                inline={true}
+                restaurant={business}
+                currentStoreId={qrModalStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || "losamigos"}
+                allStores={
+                  Array.isArray(availableStores) && availableStores.length > 0
+                    ? availableStores
+                    : Array.isArray(registeredClients) && registeredClients.length > 0
+                    ? registeredClients.map((c) => ({
+                        id: (c?.requestedUser && c.requestedUser.includes("@"))
+                          ? c.requestedUser.split("@")[0].toLowerCase().replace(/[^a-z0-9_-]/g, "")
+                          : (c?.id || "comercio"),
+                        name:
+                          c?.businessName ||
+                          c?.name ||
+                          (c?.requestedUser
+                            ? String(c.requestedUser).split("@")[0].replace(/[._-]/g, " ")
+                            : "Comercio"),
+                        phoneIntl: String(c?.whatsapp || ""),
+                        phoneDisplay: String(c?.whatsapp || ""),
+                      }))
+                    : [{ id: currentStoreId || "losamigos", name: business?.name || "Menu Py", phoneIntl: String(business?.phoneIntl || ""), phoneDisplay: String(business?.phoneDisplay || "") }]
+                }
+                isSuperAdmin={adminRole === "superadmin"}
+                onOpenModal={() => openRestaurantQrModal()}
+              />
             </div>
           )}
 
@@ -13996,6 +14964,7 @@ export default function App() {
         {renderGoogleLicenseRequiredModal()}
         {renderConfirmActionModal()}
         {renderSaveDataModal()}
+        {renderSimulatorModal()}
 
         {/* Modal de Seguimiento de Pedidos y Notificaciones Push en Vivo */}
         <OrderTrackingModal
@@ -14174,18 +15143,32 @@ export default function App() {
       )}
 
       {/* Barra Superior Sticky con Nombre, Carrito y Acceso a Admin */}
-      <div style={{ background: BRAND.charcoalDark }} className={`sticky ${adminSession && adminSession.active ? "top-10" : "top-0"} z-20 shadow-lg border-b border-stone-800/80 transition-all`}>
-        <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="slab text-lg sm:text-xl md:text-2xl text-white tracking-wide leading-none truncate">
-              {business.name}
-            </h1>
-            <p className="hand text-base sm:text-lg md:text-xl leading-none mt-0.5" style={{ color: BRAND.mustard }}>
-              {business.slogan || "Pedí online"}
-            </p>
+      <div style={{ background: BRAND.charcoalDark }} className={`sticky ${adminSession && adminSession.active ? "top-10" : "top-0"} z-20 shadow-xl border-b border-stone-800/80 transition-all`}>
+        <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-2.5 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3.5">
+          <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
+            <img
+              src={menuPyLogo || "/app-logo.png?v=menupy6"}
+              alt="Logo Menú Py"
+              className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 object-contain drop-shadow-xl flex-shrink-0 select-none transition-transform duration-200 hover:scale-105"
+              onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
+            />
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <h1 className="slab text-lg sm:text-2xl md:text-3xl lg:text-4xl text-white tracking-wide leading-tight whitespace-nowrap drop-shadow-sm">
+                {business.name}
+              </h1>
+              {/* Eslogan optimizado: limpio y en una sola línea en móvil, completo en tablet y PC */}
+              <p className="hand text-xs sm:text-sm md:text-lg lg:text-xl leading-none mt-0.5" style={{ color: BRAND.mustard }}>
+                <span className="sm:hidden block truncate">
+                  {business.slogan ? (business.slogan.includes("-") ? business.slogan.split("-")[0].trim() : business.slogan) : "Pedí online"}
+                </span>
+                <span className="hidden sm:inline">
+                  {business.slogan || "Pedí online - Tu Carta Digital y Pedidos por WhatsApp"}
+                </span>
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-3 flex-shrink-0">
             {/* Mensaje de ayuda para seleccionar productos (visible en PC) */}
             <div className="hidden lg:flex items-center gap-1.5 text-right leading-tight">
               <span className="hand text-lg xl:text-xl" style={{ color: "#FFD600", maxWidth: 190 }}>
@@ -14200,7 +15183,7 @@ export default function App() {
                 setTrackingOrderId(customerOrders[0]?.id || null);
                 setTrackingModalOpen(true);
               }}
-              className="relative py-2 sm:py-2.5 px-3 sm:px-3.5 rounded-full flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition bg-stone-800 text-stone-200 border border-stone-700"
+              className="relative p-2 sm:py-2.5 sm:px-3.5 rounded-full flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition bg-stone-800 text-stone-200 border border-stone-700"
               title="Seguimiento en vivo de tus pedidos y notificaciones push"
             >
               <BellRing
@@ -14228,11 +15211,11 @@ export default function App() {
             {/* Botón del Carrito */}
             <button
               onClick={() => setCartOpen(true)}
-              className="relative py-2 sm:py-2.5 px-3.5 sm:px-4 rounded-full flex items-center gap-2 shadow-md hover:brightness-105 active:scale-95 transition"
+              className="relative p-2 sm:py-2.5 sm:px-4 rounded-full flex items-center gap-1.5 sm:gap-2 shadow-md hover:brightness-105 active:scale-95 transition"
               style={{ background: BRAND.tomato }}
               title="Ver tu pedido"
             >
-              <ShoppingCart size={19} color={BRAND.cream} />
+              <ShoppingCart size={18} color={BRAND.cream} />
               <span className="font-bold text-xs sm:text-sm hidden sm:inline" style={{ color: BRAND.cream }}>
                 {totalPrice > 0 ? formatGs(totalPrice) : "Carrito"}
               </span>
@@ -14243,10 +15226,26 @@ export default function App() {
               )}
             </button>
 
+            {/* Botón Generador de Código QR del Menú / Mesas (Exclusivo Administrador y/o Gerente) */}
+            {isManagerOrAdmin && (
+              <button
+                onClick={() => openRestaurantQrModal()}
+                className="inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-stone-950 cursor-pointer"
+                style={{
+                  background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 60%, #F59E0B 100%)",
+                  boxShadow: "0 2px 8px rgba(245, 158, 11, 0.35)",
+                }}
+                title="Generar o imprimir código QR único de la carta o mesas de este restaurante (Exclusivo Gerencia)"
+              >
+                <QrCode size={15} />
+                <span className="hidden sm:inline">Código QR</span>
+              </button>
+            )}
+
             {/* Botón Instalar App (Acceso directo con logo oficial) */}
             <button
               onClick={() => setShowInstallModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-white"
+              className="inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-full text-xs font-bold transition shadow-sm hover:brightness-110 active:scale-95 text-white"
               style={{
                 background: "linear-gradient(135deg, #0050E6 0%, #0072FF 60%, #00B4D8 100%)",
                 boxShadow: "0 2px 8px rgba(0, 114, 255, 0.3)"
@@ -14576,6 +15575,17 @@ export default function App() {
                     {n}
                   </button>
                 ))}
+                {isManagerOrAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => openRestaurantQrModal()}
+                    className="px-2 py-0.5 text-xs rounded-md font-bold bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition flex items-center gap-1 shrink-0 ml-1"
+                    title="Generar código QR para imprimir en esta mesa (Exclusivo Gerencia)"
+                  >
+                    <QrCode size={11} />
+                    <span>QR Mesa</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -15512,24 +16522,36 @@ export default function App() {
           <p className="font-bold text-white text-sm tracking-wide">{business.name}</p>
           <p className="text-slate-300">{business.address}</p>
           <p className="text-sky-200/80">Pedidos vía WhatsApp al {business.phoneDisplay}</p>
-          <div className="pt-2 pb-1">
+          <div className="pt-2 pb-1 flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => setShowInstallModal(true)}
-              className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-lg hover:brightness-110 active:scale-95 transition inline-flex items-center gap-2 border border-sky-400/40"
+              className="px-4 py-2 rounded-full text-xs font-bold text-stone-950 shadow-lg hover:brightness-110 active:scale-95 transition inline-flex items-center gap-2 border border-amber-300"
               style={{
-                background: "linear-gradient(135deg, #0050E6 0%, #0072FF 50%, #00A2FF 100%)",
-                boxShadow: "0 4px 15px rgba(0, 114, 255, 0.35)"
+                background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 50%, #F59E0B 100%)",
+                boxShadow: "0 4px 15px rgba(245, 158, 11, 0.4)"
               }}
             >
               <img
-                src="/app-logo.png"
-                alt=""
-                className="w-4 h-4 rounded-full bg-white object-contain"
-                onError={(e) => { e.currentTarget.src = "/app-logo.svg"; }}
+                src={menuPyLogo || "/app-logo.png?v=menupy6"}
+                alt="Menú Py"
+                className="w-5 h-5 object-contain select-none"
+                onError={(e) => { e.currentTarget.src = "/app-logo.png?v=menupy6"; }}
               />
-              <span>Instalar App en tu celular o PC (Acceso directo)</span>
+              <span>Instalar Menú Py (Acceso directo)</span>
             </button>
+
+            {isManagerOrAdmin && (
+              <button
+                type="button"
+                onClick={() => openRestaurantQrModal()}
+                className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-lg hover:bg-stone-800 active:scale-95 transition inline-flex items-center gap-2 border border-stone-700 bg-stone-900/90"
+                title="Generar o descargar códigos QR para tus mesas (Exclusivo Gerencia)"
+              >
+                <QrCode size={15} className="text-amber-400" />
+                <span>Ver Códigos QR de Mesas</span>
+              </button>
+            )}
           </div>
 
           {/* Enlace al panel de precios para adquirir la app */}
@@ -15546,21 +16568,39 @@ export default function App() {
                 <Sparkles size={17} className="text-amber-400 animate-pulse" />
                 <span>¿Querés una App con pedidos para tu propio negocio?</span>
               </p>
-              <div>
+              <div className="flex flex-wrap items-center justify-center gap-1.5 text-[11px] font-bold text-amber-100/90 py-1">
+                <span className="bg-stone-900/40 px-2.5 py-0.5 rounded-full border border-amber-300/30">🍕 Menú Online</span>
+                <span className="bg-stone-900/40 px-2.5 py-0.5 rounded-full border border-amber-300/30">🛵 Delivery con GPS</span>
+                <span className="bg-stone-900/40 px-2.5 py-0.5 rounded-full border border-amber-300/30">👨‍🍳 Cocina en Vivo</span>
+                <span className="bg-stone-900/40 px-2.5 py-0.5 rounded-full border border-amber-300/30">💰 0% Comisiones</span>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowSimulatorModal(true)}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-full font-black text-xs md:text-sm text-white shadow-xl hover:brightness-110 active:scale-95 transition inline-flex items-center justify-center gap-2 border-2 border-emerald-300 cursor-pointer"
+                  style={{
+                    background: "linear-gradient(135deg, #059669 0%, #10B981 50%, #059669 100%)",
+                    boxShadow: "0 4px 20px rgba(16, 185, 129, 0.45)"
+                  }}
+                >
+                  <Sparkles size={16} className="text-amber-300" />
+                  <span>🎮 Ver Simulador en Vivo y Beneficios</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
                     setRegSuccessVoucher(null);
                     setView("register");
                   }}
-                  className="px-5 py-2.5 rounded-full font-black text-xs md:text-sm text-stone-900 shadow-xl hover:brightness-110 active:scale-95 transition inline-flex items-center gap-2 border-2 border-amber-200"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-full font-black text-xs md:text-sm text-stone-900 shadow-xl hover:brightness-110 active:scale-95 transition inline-flex items-center justify-center gap-2 border-2 border-amber-200"
                   style={{
                     background: "linear-gradient(135deg, #F59E0B 0%, #FBBF24 50%, #F59E0B 100%)",
                     boxShadow: "0 4px 20px rgba(245, 158, 11, 0.45)"
                   }}
                 >
                   <Store size={16} />
-                  <span>Adquirir App para mi Comercio (Planes y Precios)</span>
+                  <span>Adquirir App (Planes y Precios)</span>
                 </button>
               </div>
             </div>
@@ -15617,7 +16657,7 @@ export default function App() {
                   title={adminSession && adminSession.active ? "Volver a Panel de Control" : "Acceso Administración"}
                 >
                   <Lock size={10} />
-                  <span>{adminSession && adminSession.active ? "Volver a Panel de Control" : "Acceso Gerencia"}</span>
+                  <span>{adminSession && adminSession.active ? "VOLVER A PANEL DE CONTROL" : "ACCESO GERENCIA"}</span>
                 </button>
               </div>
             </div>
@@ -15650,6 +16690,7 @@ export default function App() {
       {renderGoogleLicenseRequiredModal()}
       {renderConfirmActionModal()}
       {renderSaveDataModal()}
+      {renderSimulatorModal()}
 
       {/* Modal de Seguimiento de Pedidos y Notificaciones Push en Vivo */}
       <OrderTrackingModal
@@ -15714,6 +16755,37 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal de Generador de Códigos QR de Restaurante y Mesas (Exclusivo Administrador / Gerente) */}
+      {showQrModal && isManagerOrAdmin && (
+        <RestaurantQrModal
+          key="floating_qr_modal"
+          isOpen={true}
+          onClose={() => setShowQrModal(false)}
+          restaurant={business}
+          currentStoreId={qrModalStoreId || sessionStorage.getItem("caserita_auth_store_id") || currentStoreId || "losamigos"}
+          allStores={
+            Array.isArray(availableStores) && availableStores.length > 0
+              ? availableStores
+              : Array.isArray(registeredClients) && registeredClients.length > 0
+              ? registeredClients.map((c) => ({
+                  id: (c?.requestedUser && c.requestedUser.includes("@"))
+                    ? c.requestedUser.split("@")[0].toLowerCase().replace(/[^a-z0-9_-]/g, "")
+                    : (c?.id || "comercio"),
+                  name:
+                    c?.businessName ||
+                    c?.name ||
+                    (c?.requestedUser
+                      ? String(c.requestedUser).split("@")[0].replace(/[._-]/g, " ")
+                      : "Comercio"),
+                  phoneIntl: String(c?.whatsapp || ""),
+                  phoneDisplay: String(c?.whatsapp || ""),
+                }))
+              : [{ id: currentStoreId || "losamigos", name: business?.name || "Menu Py", phoneIntl: String(business?.phoneIntl || ""), phoneDisplay: String(business?.phoneDisplay || "") }]
+          }
+          isSuperAdmin={adminRole === "superadmin"}
+        />
       )}
 
       {/* Modal de Instalación PWA (con Logo Oficial) */}

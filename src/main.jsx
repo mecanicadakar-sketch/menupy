@@ -14,7 +14,7 @@ class RootErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error("[AI Studio] Uncaught application error:", error, errorInfo);
+    console.error("[Menu Py] Application error:", error, errorInfo);
     this.setState({ errorInfo });
   }
 
@@ -78,12 +78,30 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </React.StrictMode>
 );
 
-// Registro de Service Worker para PWA (instalación en celular y PC)
+// Registro de Service Worker para PWA (con detección inmediata de nuevas versiones)
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((err) => {
-      console.warn("ServiceWorker registration:", err);
-    });
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((reg) => {
+        // Forzar comprobación de versión actualizada
+        reg.update().catch(() => {});
+
+        reg.onupdatefound = () => {
+          const installingWorker = reg.installing;
+          if (installingWorker) {
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+                console.log("[Menu Py] Nueva versión detectada, recargando para mostrar cambios...");
+                window.location.reload();
+              }
+            };
+          }
+        };
+      })
+      .catch((err) => {
+        console.warn("ServiceWorker registration:", err);
+      });
   });
 }
 
