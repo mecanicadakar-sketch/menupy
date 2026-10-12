@@ -11,7 +11,8 @@ import {
   Map, Crosshair, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   FileText, Download, MessageCircle, CheckCheck,
   Bell, BellRing, ChefHat, Volume2, LogOut, UserPlus, Pencil,
-  Maximize2, Minimize2, Smartphone, Flame, ArrowRight, TrendingUp
+  Maximize2, Minimize2, Smartphone, Flame, ArrowRight, TrendingUp,
+  Palette
 } from "lucide-react";
 import InstallAppModal from "./components/InstallAppModal.jsx";
 import RestaurantQrModal from "./components/RestaurantQrModal.jsx";
@@ -335,6 +336,36 @@ function formatLockTime(seconds) {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
+// Paleta de colores recomendada para cuadros de menú (gastronomía profesional)
+export const MENU_CARD_COLOR_PRESETS = [
+  { id: "white", name: "Blanco Puro", color: "#FFFFFF", border: "#E2E8F0" },
+  { id: "cream_caserita", name: "Crema Caserita", color: "#FBF2DD", border: "#E6D2A3" },
+  { id: "ivory", name: "Marfil Suave", color: "#FFFDF5", border: "#F5E6C8" },
+  { id: "sand", name: "Arena Cálida", color: "#F7F2E7", border: "#EADDC9" },
+  { id: "vanilla", name: "Vainilla Pastel", color: "#FEF9E7", border: "#FBE7B2" },
+  { id: "mint", name: "Menta Fresca", color: "#F0FDF4", border: "#BBF7D0" },
+  { id: "amber", name: "Ámbar Cálido", color: "#FFFBEB", border: "#FDE68A" },
+  { id: "peach", name: "Melocotón Suave", color: "#FFF7ED", border: "#FED7AA" },
+  { id: "rose", name: "Rosa Pastel", color: "#FFF1F2", border: "#FECDD3" },
+  { id: "sky", name: "Celeste Suave", color: "#F0F9FF", border: "#BAE6FD" },
+  { id: "lavender", name: "Lavanda Claro", color: "#F5F3FF", border: "#DDD6FE" },
+  { id: "slate", name: "Gris Pizarra", color: "#F8FAFC", border: "#E2E8F0" },
+  { id: "dark", name: "Carbón Elegante", color: "#1E293B", border: "#334155" },
+];
+
+export function isDarkColor(color) {
+  if (!color || typeof color !== "string") return false;
+  let c = color.trim().replace("#", "");
+  if (c.length === 3) c = c.split("").map((ch) => ch + ch).join("");
+  if (c.length !== 6) return false;
+  const r = parseInt(c.substr(0, 2), 16);
+  const g = parseInt(c.substr(2, 2), 16);
+  const b = parseInt(c.substr(4, 2), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return false;
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq < 140;
+}
+
 const DEFAULT_BUSINESS = {
   name: "Menu Py",
   slogan: "Pedí online - Tu Carta Digital y Pedidos por WhatsApp",
@@ -343,6 +374,8 @@ const DEFAULT_BUSINESS = {
   address: "Encarnación, Paraguay",
   bannerImage: "/menupy_mockup_qr.jpg",
   deliveryNote: "El costo de envío se coordina según la zona",
+  menuCardBg: "#FFFFFF",
+  menuCardImageBg: "#FFFFFF",
   adminUser: "gerente",
   sessionPersistence: "keep_active", // "keep_active" | "close_on_exit"
   licenseCode: "CAS-7K9B-X2M4",
@@ -5768,6 +5801,8 @@ export default function App() {
             businessName: businessPayload.name,
             slogan: businessPayload.slogan,
             bannerImage: businessPayload.bannerImage,
+            menuCardBg: businessPayload.menuCardBg || "#FFFFFF",
+            menuCardImageBg: businessPayload.menuCardImageBg || "#FFFFFF",
             phoneIntl: businessPayload.phoneIntl,
             phoneDisplay: businessPayload.phoneDisplay,
             address: businessPayload.address,
@@ -5782,6 +5817,8 @@ export default function App() {
             name: businessPayload.name || "Menu Py",
             slogan: businessPayload.slogan || "Pedí online - Tu Carta Digital y Pedidos por WhatsApp",
             bannerImage: businessPayload.bannerImage || "/Flyers-MenuPY.png",
+            menuCardBg: businessPayload.menuCardBg || "#FFFFFF",
+            menuCardImageBg: businessPayload.menuCardImageBg || "#FFFFFF",
             phoneIntl: businessPayload.phoneIntl,
             phoneDisplay: businessPayload.phoneDisplay,
             address: businessPayload.address,
@@ -13035,6 +13072,195 @@ export default function App() {
                 </div>
               )}
 
+              {/* =========================================================
+                  PALETA DE COLORES PARA CUADROS DE MENÚ
+                  Permite al gerente adaptar el fondo del cuadro a su preferencia
+                  ========================================================= */}
+              <div
+                className="rounded-2xl p-4 md:p-5 border-2 shadow-sm space-y-4"
+                style={{ background: "#FFFFFF", borderColor: BRAND.paperDark }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-200">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm shrink-0" style={{ background: BRAND.tomato }}>
+                      <Palette size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-sm md:text-base text-stone-900 flex items-center gap-2 flex-wrap">
+                        <span>Paleta de Colores de los Cuadros de Menú</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                          Personalizable
+                        </span>
+                      </h3>
+                      <p className="text-xs text-stone-600 mt-0.5">
+                        Adaptá el color de fondo de las tarjetas de tu menú al estilo que prefieras. Podés elegir un tono predefinido o cualquier color exacto.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetColor = draftBusiness.menuCardBg || "#FFFFFF";
+                        setDraft((prev) =>
+                          prev.map((c) => ({
+                            ...c,
+                            items: c.items.map((it) => ({ ...it, cardBg: targetColor }))
+                          }))
+                        );
+                        setDirty(true);
+                        addToast("order_update", "Color aplicado a todos los productos", `Se sincronizó el tono ${targetColor} en todos los cuadros del menú.`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1.5"
+                      style={{ background: BRAND.cream, borderColor: BRAND.paperDark, color: BRAND.charcoal }}
+                      title="Aplicar el color actual de la paleta a todos los productos del menú"
+                    >
+                      <Sparkles size={13} color={BRAND.tomato} />
+                      <span>Aplicar a todos los cuadros</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Muestrario de Paleta de Colores Gastronómicos */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                      <span>Seleccionar tono para los cuadros del menú:</span>
+                    </label>
+                    <span className="text-[11px] font-bold text-stone-500">
+                      Color actual: <span className="font-mono text-stone-800 uppercase font-black">{draftBusiness.menuCardBg || "#FFFFFF"}</span>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                    {MENU_CARD_COLOR_PRESETS.map((preset) => {
+                      const currentBg = (draftBusiness.menuCardBg || "#FFFFFF").toUpperCase();
+                      const isSelected = currentBg === preset.color.toUpperCase();
+                      const isDark = isDarkColor(preset.color);
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            setDraftBusiness((prev) => ({ ...prev, menuCardBg: preset.color }));
+                            setDirty(true);
+                          }}
+                          className={`p-2 rounded-xl border-2 transition-all flex items-center gap-2 text-left group shadow-xs ${
+                            isSelected
+                              ? "ring-2 ring-amber-500 scale-[1.03]"
+                              : "hover:scale-[1.01] hover:border-stone-400"
+                          }`}
+                          style={{
+                            background: preset.color,
+                            borderColor: isSelected ? BRAND.tomato : preset.border,
+                            color: isDark ? "#FFFFFF" : BRAND.charcoal
+                          }}
+                        >
+                          <div
+                            className="w-5 h-5 rounded-full border shrink-0 flex items-center justify-center shadow-xs"
+                            style={{
+                              background: preset.color,
+                              borderColor: isDark ? "#64748B" : "#CBD5E1"
+                            }}
+                          >
+                            {isSelected && (
+                              <Check size={12} strokeWidth={3} color={isDark ? "#FFFFFF" : BRAND.tomato} />
+                            )}
+                          </div>
+                          <span className="text-[11px] font-bold truncate leading-tight">
+                            {preset.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Selector libre con cuentagotas y código HEX + Vista Previa en Vivo */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center bg-stone-50 p-3 rounded-xl border border-stone-200">
+                  <div className="lg:col-span-7 flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-stone-700">O personalizar color libre:</span>
+                      <label className="relative cursor-pointer flex items-center gap-1.5 px-2 py-1 bg-white border border-stone-300 rounded-lg shadow-inner hover:border-stone-400 transition">
+                        <input
+                          type="color"
+                          value={draftBusiness.menuCardBg || "#FFFFFF"}
+                          onChange={(e) => {
+                            setDraftBusiness((prev) => ({ ...prev, menuCardBg: e.target.value }));
+                            setDirty(true);
+                          }}
+                          className="w-6 h-6 rounded cursor-pointer border-0 p-0"
+                          title="Clic para abrir la paleta completa"
+                        />
+                        <span className="text-xs font-mono font-bold text-stone-800">
+                          {draftBusiness.menuCardBg || "#FFFFFF"}
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftBusiness((prev) => ({ ...prev, menuCardBg: "#FFFFFF" }));
+                          setDirty(true);
+                        }}
+                        className="text-[11px] font-bold px-2 py-1 rounded bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 transition"
+                      >
+                        Poner Blanco
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftBusiness((prev) => ({ ...prev, menuCardBg: "#FBF2DD" }));
+                          setDirty(true);
+                        }}
+                        className="text-[11px] font-bold px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition"
+                      >
+                        Poner Crema
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Vista previa en miniatura de cómo lucirá el cuadro */}
+                  <div className="lg:col-span-5 flex items-center justify-start lg:justify-end gap-2.5">
+                    <div className="text-right hidden sm:block">
+                      <div className="flex items-center justify-end gap-1 text-xs text-stone-500 font-bold">
+                        <Eye size={13} />
+                        <span>Vista previa:</span>
+                      </div>
+                      <span className="text-[10px] text-stone-400">Así verán los clientes</span>
+                    </div>
+                    {(() => {
+                      const sampleBg = draftBusiness.menuCardBg || "#FFFFFF";
+                      const sampleIsDark = isDarkColor(sampleBg);
+                      return (
+                        <div
+                          className="w-52 p-2.5 rounded-xl border shadow-sm transition-all"
+                          style={{
+                            background: sampleBg,
+                            borderColor: sampleIsDark ? "#475569" : (sampleBg === "#FFFFFF" ? "#E2E8F0" : BRAND.paperDark),
+                            color: sampleIsDark ? "#FFFFFF" : BRAND.charcoal
+                          }}
+                        >
+                          <div className="w-full h-12 rounded-lg bg-white border border-stone-200 flex items-center justify-center p-1 mb-1.5 shadow-xs">
+                            <span className="text-[10px] font-bold text-stone-400">🖼️ Foto del Plato</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] font-bold">
+                            <span className="truncate">Lomito Completo</span>
+                            <span style={{ color: sampleIsDark ? BRAND.mustardLight : BRAND.tomato }}>36.000 Gs.</span>
+                          </div>
+                          <p className="text-[9px] truncate mt-0.5" style={{ color: sampleIsDark ? "#CBD5E1" : "#78716C" }}>
+                            Carne tierna, queso, jamón y papas
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
               {draft.map((c, catIdx) => (
                 <div key={catIdx} className="rounded-2xl p-4 md:p-6 border-2 shadow-sm" style={{ background: BRAND.cream, borderColor: BRAND.paperDark }}>
                   {/* Cabecera de Categoría */}
@@ -13103,111 +13329,178 @@ export default function App() {
 
                   {/* Lista de productos de la categoría (adaptada a grid en PC) */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {c.items.map((item, itemIdx) => (
-                      <div key={item.id} className="rounded-xl p-3.5 flex gap-3 border shadow-sm" style={{ background: BRAND.paper, borderColor: BRAND.paperDark }}>
-                        {/* Subida de foto del plato */}
-                        <label
-                          className="relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 flex items-center justify-center cursor-pointer shadow-inner hover:opacity-90 transition"
-                          style={{ borderColor: BRAND.paperDark, background: BRAND.cream }}
+                    {c.items.map((item, itemIdx) => {
+                      const itemCardBg = item.cardBg || draftBusiness.menuCardBg || "#FFFFFF";
+                      const itemIsDark = isDarkColor(itemCardBg);
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-xl p-3.5 flex flex-col justify-between border shadow-sm transition-colors"
+                          style={{
+                            background: itemCardBg,
+                            borderColor: itemIsDark ? "#475569" : BRAND.paperDark
+                          }}
                         >
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => handleImageUpload(catIdx, itemIdx, e.target.files?.[0])}
-                          />
-                          {imgLoading === item.id ? (
-                            <LoaderCircle className="animate-spin" size={20} color={BRAND.tomato} />
-                          ) : item.image ? (
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="flex flex-col items-center gap-1 text-stone-500">
-                              <ImageIcon size={20} color={BRAND.tomatoDark} />
-                              <span className="text-[10px] font-bold">Foto</span>
-                            </div>
-                          )}
-                          {item.image && imgLoading !== item.id && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.preventDefault(); updateItemField(catIdx, itemIdx, "image", ""); }}
-                              className="absolute top-1 right-1 rounded-full p-1 shadow"
-                              style={{ background: BRAND.tomato }}
-                              title="Quitar foto"
+                          <div className="flex gap-3">
+                            {/* Subida de foto del plato */}
+                            <label
+                              className="relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 flex items-center justify-center cursor-pointer shadow-inner hover:opacity-90 transition"
+                              style={{ borderColor: itemIsDark ? "#64748B" : BRAND.paperDark, background: item.image ? "#ffffff" : (itemIsDark ? "#334155" : BRAND.cream) }}
                             >
-                              <X size={11} color={BRAND.cream} />
-                            </button>
-                          )}
-                        </label>
-
-                        {/* Campos de texto del plato */}
-                        <div className="flex-1 min-w-0 flex flex-col justify-between">
-                          <div>
-                            {/* Selector de categoría por si se quiere mover este producto */}
-                            <div className="flex items-center justify-between gap-1 mb-1.5 pb-1 border-b" style={{ borderColor: BRAND.paperDark }}>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] font-bold text-stone-500 uppercase">Categoría:</span>
-                                <select
-                                  value={catIdx}
-                                  onChange={(e) => moveItemToCategory(catIdx, itemIdx, Number(e.target.value))}
-                                  className="bg-white border rounded-md px-1.5 py-0.5 text-[11px] font-bold text-stone-800 focus:outline-none"
-                                  style={{ borderColor: BRAND.paperDark }}
-                                  title="Mover este producto a otra categoría"
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleImageUpload(catIdx, itemIdx, e.target.files?.[0])}
+                              />
+                              {imgLoading === item.id ? (
+                                <LoaderCircle className="animate-spin" size={20} color={BRAND.tomato} />
+                              ) : item.image ? (
+                                <img src={item.image} alt={item.name} className="w-full h-full object-contain p-0.5" />
+                              ) : (
+                                <div className="flex flex-col items-center gap-1 text-stone-500">
+                                  <ImageIcon size={20} color={BRAND.tomatoDark} />
+                                  <span className="text-[10px] font-bold">Foto</span>
+                                </div>
+                              )}
+                              {item.image && imgLoading !== item.id && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); updateItemField(catIdx, itemIdx, "image", ""); }}
+                                  className="absolute top-1 right-1 rounded-full p-1 shadow"
+                                  style={{ background: BRAND.tomato }}
+                                  title="Quitar foto"
                                 >
-                                  {draft.map((cat, idx) => (
-                                    <option key={idx} value={idx}>
-                                      {cat.category || `Categoría ${idx + 1}`}
-                                    </option>
-                                  ))}
-                                </select>
+                                  <X size={11} color={BRAND.cream} />
+                                </button>
+                              )}
+                            </label>
+
+                            {/* Campos de texto del plato */}
+                            <div className="flex-1 min-w-0 flex flex-col justify-between">
+                              <div>
+                                {/* Selector de categoría por si se quiere mover este producto */}
+                                <div className="flex items-center justify-between gap-1 mb-1.5 pb-1 border-b" style={{ borderColor: itemIsDark ? "rgba(255,255,255,0.15)" : BRAND.paperDark }}>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-bold uppercase" style={{ color: itemIsDark ? "#94A3B8" : "#78716C" }}>Categoría:</span>
+                                    <select
+                                      value={catIdx}
+                                      onChange={(e) => moveItemToCategory(catIdx, itemIdx, Number(e.target.value))}
+                                      className="bg-white border rounded-md px-1.5 py-0.5 text-[11px] font-bold text-stone-800 focus:outline-none"
+                                      style={{ borderColor: BRAND.paperDark }}
+                                      title="Mover este producto a otra categoría"
+                                    >
+                                      {draft.map((cat, idx) => (
+                                        <option key={idx} value={idx}>
+                                          {cat.category || `Categoría ${idx + 1}`}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteItem(catIdx, itemIdx)}
+                                    className="p-1 rounded-lg hover:brightness-90 transition text-white"
+                                    style={{ background: BRAND.tomato }}
+                                    title="Eliminar plato"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+
+                                <div className="flex gap-2 items-center mb-1.5">
+                                  <input
+                                    value={item.name}
+                                    onChange={(e) => updateItemField(catIdx, itemIdx, "name", e.target.value)}
+                                    placeholder="Nombre del plato"
+                                    className="flex-1 rounded-lg p-1.5 text-xs md:text-sm font-bold border"
+                                    style={{ borderColor: BRAND.paperDark, background: "#FFF" }}
+                                  />
+                                </div>
+
+                                <input
+                                  value={item.desc}
+                                  onChange={(e) => updateItemField(catIdx, itemIdx, "desc", e.target.value)}
+                                  placeholder="Descripción o ingredientes"
+                                  className="w-full rounded-lg p-1.5 text-xs border mb-1.5"
+                                  style={{ borderColor: BRAND.paperDark, background: "#FFF" }}
+                                />
                               </div>
+
+                              <div className="flex gap-2 items-center">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={formatPriceInput(item.price)}
+                                  onChange={(e) => {
+                                    const digits = e.target.value.replace(/[^\d]/g, "");
+                                    updateItemField(catIdx, itemIdx, "price", digits === "" ? "" : Number(digits));
+                                  }}
+                                  placeholder="0 Gs."
+                                  className="w-32 rounded-lg p-1.5 text-xs font-bold border text-right"
+                                  style={{ borderColor: BRAND.paperDark, background: "#FFF", color: BRAND.tomato }}
+                                />
+                                <span className="text-[11px] text-stone-500 truncate">Precio en Guaraníes</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Paleta individual para este cuadro de menú */}
+                          <div className="mt-2.5 pt-2 border-t flex flex-wrap items-center justify-between gap-1.5" style={{ borderColor: itemIsDark ? "rgba(255,255,255,0.15)" : BRAND.paperDark }}>
+                            <div className="flex items-center gap-1 text-[11px]" style={{ color: itemIsDark ? "#E2E8F0" : "#57534E" }}>
+                              <Palette size={12} className="text-amber-600" />
+                              <span className="font-bold">Fondo cuadro:</span>
+                            </div>
+                            <div className="flex items-center gap-1 flex-wrap">
                               <button
                                 type="button"
-                                onClick={() => deleteItem(catIdx, itemIdx)}
-                                className="p-1 rounded-lg hover:brightness-90 transition text-white"
-                                style={{ background: BRAND.tomato }}
-                                title="Eliminar plato"
+                                onClick={() => updateItemField(catIdx, itemIdx, "cardBg", "")}
+                                title="Usar color general de la carta"
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition ${
+                                  !item.cardBg
+                                    ? "bg-stone-800 text-white border-stone-800"
+                                    : "bg-white text-stone-600 border-stone-300 hover:bg-stone-100"
+                                }`}
                               >
-                                <Trash2 size={12} />
+                                General
                               </button>
+                              {MENU_CARD_COLOR_PRESETS.slice(0, 5).map((preset) => {
+                                const isItemActive = (item.cardBg || "").toUpperCase() === preset.color.toUpperCase();
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => updateItemField(catIdx, itemIdx, "cardBg", preset.color)}
+                                    title={preset.name}
+                                    className="w-4 h-4 rounded-full border shadow-xs transition hover:scale-110 flex items-center justify-center"
+                                    style={{
+                                      background: preset.color,
+                                      borderColor: isItemActive ? BRAND.tomato : preset.border,
+                                      borderWidth: isItemActive ? 2 : 1
+                                    }}
+                                  >
+                                    {isItemActive && (
+                                      <div
+                                        className="w-1.5 h-1.5 rounded-full"
+                                        style={{ background: isDarkColor(preset.color) ? "#FFF" : BRAND.charcoal }}
+                                      />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                              <label title="Elegir cualquier color para este cuadro" className="cursor-pointer flex items-center">
+                                <input
+                                  type="color"
+                                  value={item.cardBg || draftBusiness.menuCardBg || "#FFFFFF"}
+                                  onChange={(e) => updateItemField(catIdx, itemIdx, "cardBg", e.target.value)}
+                                  className="w-4 h-4 rounded-full border border-stone-300 p-0 cursor-pointer"
+                                />
+                              </label>
                             </div>
-
-                            <div className="flex gap-2 items-center mb-1.5">
-                              <input
-                                value={item.name}
-                                onChange={(e) => updateItemField(catIdx, itemIdx, "name", e.target.value)}
-                                placeholder="Nombre del plato"
-                                className="flex-1 rounded-lg p-1.5 text-xs md:text-sm font-bold border"
-                                style={{ borderColor: BRAND.paperDark, background: "#FFF" }}
-                              />
-                            </div>
-
-                            <input
-                              value={item.desc}
-                              onChange={(e) => updateItemField(catIdx, itemIdx, "desc", e.target.value)}
-                              placeholder="Descripción o ingredientes"
-                              className="w-full rounded-lg p-1.5 text-xs border mb-1.5"
-                              style={{ borderColor: BRAND.paperDark, background: "#FFF" }}
-                            />
-                          </div>
-
-                          <div className="flex gap-2 items-center">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              value={formatPriceInput(item.price)}
-                              onChange={(e) => {
-                                const digits = e.target.value.replace(/[^\d]/g, "");
-                                updateItemField(catIdx, itemIdx, "price", digits === "" ? "" : Number(digits));
-                              }}
-                              placeholder="0 Gs."
-                              className="w-32 rounded-lg p-1.5 text-xs font-bold border text-right"
-                              style={{ borderColor: BRAND.paperDark, background: "#FFF", color: BRAND.tomato }}
-                            />
-                            <span className="text-[11px] text-stone-500 truncate">Precio en Guaraníes</span>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {imgError && (
@@ -15731,41 +16024,54 @@ export default function App() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
                 {c.items.map((item) => {
                   const qty = cart[item.id] || 0;
+                  const cardBgColor = item.cardBg || business.menuCardBg || "#FFFFFF";
+                  const isDark = isDarkColor(cardBgColor);
+                  const cardBorderColor = isDark ? "#475569" : (cardBgColor === "#FFFFFF" ? "#E2E8F0" : BRAND.paperDark);
+                  const titleColor = isDark ? "#FFFFFF" : BRAND.charcoal;
+                  const descColor = isDark ? "#CBD5E1" : "#57534E";
+                  const dividerColor = isDark ? "rgba(255,255,255,0.15)" : BRAND.paperDark;
+                  const imageContainerBg = item.imageBg || business.menuCardImageBg || "#FFFFFF";
                   return (
                     <div
                       key={item.id}
                       className="rounded-2xl p-3.5 flex flex-col justify-between shadow-md border hover:shadow-lg transition-all"
-                      style={{ background: BRAND.cream, borderColor: BRAND.paperDark }}
+                      style={{ background: cardBgColor, borderColor: cardBorderColor }}
                     >
                       <div>
                         {/* Foto del plato (si existe) */}
                         {item.image && (
-                          <div className="w-full h-40 mb-3 rounded-xl overflow-hidden bg-stone-200">
+                          <div
+                            className="w-full h-44 mb-3 rounded-xl overflow-hidden border flex items-center justify-center p-1 shadow-sm transition-colors"
+                            style={{
+                              background: imageContainerBg,
+                              borderColor: isDark ? "rgba(255,255,255,0.2)" : "#E2E8F0"
+                            }}
+                          >
                             <img
                               src={item.image}
                               alt={item.name}
-                              className="w-full h-full object-cover hover:scale-105 transition duration-300"
+                              className="w-full h-full object-contain object-center hover:scale-105 transition-transform duration-300 block"
                               loading="lazy"
                             />
                           </div>
                         )}
 
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="font-bold text-base md:text-lg leading-snug" style={{ color: BRAND.charcoal }}>
+                          <h3 className="font-bold text-base md:text-lg leading-snug" style={{ color: titleColor }}>
                             {item.name}
                           </h3>
                         </div>
 
                         {item.desc && (
-                          <p className="text-xs text-stone-600 line-clamp-2 mt-1 leading-relaxed">
+                          <p className="text-xs line-clamp-2 mt-1 leading-relaxed" style={{ color: descColor }}>
                             {item.desc}
                           </p>
                         )}
                       </div>
 
                       {/* Selector directo de modalidad en cada cuadro de menú */}
-                      <div className="my-2.5 pt-2 border-t flex items-center justify-between gap-1" style={{ borderColor: BRAND.paperDark }}>
-                        <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                      <div className="my-2.5 pt-2 border-t flex items-center justify-between gap-1" style={{ borderColor: dividerColor }}>
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: isDark ? "#94A3B8" : "#78716C" }}>
                           Pedir para:
                         </span>
                         <div className="flex items-center gap-1">
@@ -15775,6 +16081,8 @@ export default function App() {
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold flex items-center gap-1 border transition ${
                               mode === "mesa"
                                 ? "bg-[#C1392B] text-white border-[#9E2C20] shadow-sm"
+                                : isDark
+                                ? "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
                                 : "bg-white text-stone-600 border-stone-200 hover:bg-stone-100"
                             }`}
                             title="Pedir para mesa en el salón"
@@ -15788,6 +16096,8 @@ export default function App() {
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold flex items-center gap-1 border transition ${
                               mode === "delivery"
                                 ? "bg-[#C1392B] text-white border-[#9E2C20] shadow-sm"
+                                : isDark
+                                ? "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
                                 : "bg-white text-stone-600 border-stone-200 hover:bg-stone-100"
                             }`}
                             title="Pedir para delivery"
@@ -15801,6 +16111,8 @@ export default function App() {
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold flex items-center gap-1 border transition ${
                               mode === "retiro"
                                 ? "bg-[#C1392B] text-white border-[#9E2C20] shadow-sm"
+                                : isDark
+                                ? "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
                                 : "bg-white text-stone-600 border-stone-200 hover:bg-stone-100"
                             }`}
                             title="Pedir para pasar a buscar"
@@ -15812,10 +16124,10 @@ export default function App() {
                       </div>
 
                       {/* Precio y controles de cantidad */}
-                      <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: BRAND.paperDark }}>
+                      <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: dividerColor }}>
                         <div>
-                          <span className="text-[10px] text-stone-500 uppercase tracking-wider block font-bold">Precio</span>
-                          <span className="font-black text-base md:text-lg" style={{ color: BRAND.tomato }}>
+                          <span className="text-[10px] uppercase tracking-wider block font-bold" style={{ color: isDark ? "#94A3B8" : "#78716C" }}>Precio</span>
+                          <span className="font-black text-base md:text-lg" style={{ color: isDark ? BRAND.mustardLight : BRAND.tomato }}>
                             {formatGs(item.price)}
                           </span>
                         </div>
@@ -15842,12 +16154,12 @@ export default function App() {
                               <button
                                 onClick={() => removeItem(item.id)}
                                 className="p-1.5 rounded-full hover:brightness-95 active:scale-90 transition"
-                                style={{ background: BRAND.paperDark, color: BRAND.charcoal }}
+                                style={{ background: isDark ? "#334155" : BRAND.paperDark, color: isDark ? "#FFFFFF" : BRAND.charcoal }}
                                 title="Quitar uno"
                               >
                                 <Minus size={16} />
                               </button>
-                              <span className="font-black text-sm min-w-[20px] text-center" style={{ color: BRAND.charcoal }}>
+                              <span className="font-black text-sm min-w-[20px] text-center" style={{ color: isDark ? "#FFFFFF" : BRAND.charcoal }}>
                                 {qty}
                               </span>
                             </>
@@ -16069,7 +16381,7 @@ export default function App() {
                             src={l.image}
                             alt={l.name}
                             referrerPolicy="no-referrer"
-                            className="w-12 h-12 rounded-xl object-cover border border-stone-200 flex-shrink-0"
+                            className="w-12 h-12 rounded-xl object-contain bg-white border border-stone-200 flex-shrink-0 p-0.5"
                           />
                         ) : (
                           <div
